@@ -9,7 +9,7 @@ static const char * idrup_check_usage =
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
 "\n"
-"and '<icnf>' is the incremental CNF file with input clauses and queries\n"
+"and '<icnf>' is the incremental CNF file with file clauses and queries\n"
 "under assumptions, '<answers>' a file with status reports for queries\n"
 "with optional model values and failed assumption justifications and\n."
 "finally '<proof>' the incrememental DRUP proof lines.\n"
@@ -18,6 +18,7 @@ static const char * idrup_check_usage =
 // clang-format on
 
 #include <assert.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,26 +122,26 @@ struct lines {
     *END (S)++ = (E); \
   } while (0)
 
-#define ALL_STACK(TYPE, E, S) \
+#define all_elements(TYPE, E, S) \
   TYPE E, *E##_PTR = BEGIN (S), *const E##_END = END (S); \
-  E##_PTR != E##_END && (E = *E##_PTR, true); \
+  E##_PTR != E##_END && (E = *E##_PTR, 1); \
   ++E##_PTR
 
 #define COPY(TYPE, DST, SRC) \
   do { \
     CLEAR (DST); \
-    for (ALL_STACK (TYPE, E, SRC)) \
+    for (all_elements (TYPE, E, SRC)) \
       PUSH (DST, E); \
   } while (0)
 
-struct input {
+struct file {
   FILE *file;
   const char *name;
   size_t lineno, charno;
 };
 
-static struct input inputs[3];
-static struct input *input;
+static struct file files[3];
+static struct file *file;
 
 static struct ints line;
 static struct ints query;
@@ -150,10 +151,10 @@ static size_t end_buffer;
 static size_t size_buffer;
 static int end_of_file;
 
-static void set_input (struct input *new_input) {
-  assert (new_input);
-  assert (new_input->file);
-  input = new_input;
+static void set_file (struct file *new_file) {
+  assert (new_file);
+  assert (new_file->file);
+  file = new_file;
   end_buffer = size_buffer = 0;
   end_of_file = 0;
 }
@@ -164,7 +165,7 @@ static int read_char (void) {
   if (size_buffer == end_buffer) {
     if (end_of_file)
       return EOF;
-    end_buffer = fread (buffer, 1, sizeof buffer, input->file);
+    end_buffer = fread (buffer, 1, sizeof buffer, file->file);
     if (!end_buffer) {
       end_of_file = 1;
       return EOF;
@@ -181,7 +182,7 @@ static void parse_error (const char *, ...)
 static void parse_error (const char *fmt, ...) {
   assert (file);
   fprintf (stderr, "idrup-check: parse error: at line %zu in '%s': ",
-           input->lineno + 1, input->name);
+           file->lineno + 1, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -198,59 +199,88 @@ static int next_char (void) {
       parse_error ("expected new-line after carriage return");
   }
   if (res == '\n')
-    input->lineno++;
+    file->lineno++;
   if (res != EOF)
-    input->charno++;
+    file->charno++;
   return res;
 }
+
+static int ISDIGIT (int ch) { return '0' <= ch && ch <= '9'; }
 
 static int next_line (char default_type) {
   assert (default_type);
   int actual_type = 0;
   CLEAR (line);
+  int ch;
+  while ((ch = next_char ()) == 'c')
+    while ((ch = next_char ()) != '\n')
+      if (ch == EOF)
+        parse_error ("end-of-file in comment");
+  if (ch == EOF)
+    return 0;
+  if (ch == '\n')
+    parse_error ("unexpected empty line");
+  if ('a' <= ch && ch <= 'z') {
+    actual_type = ch;
+    if ((ch = next_char ()) != ' ')
+      parse_error ("expected space after '%c'", actual_type);
+    ch = next_char ();
+  } else
+    actual_type = default_type;
   for (;;) {
-    int ch = next_char ();
-    if (ch == EOF) {
-      if (!EMPTY (line))
-        parse_error ("end-of-file in the middle of a line");
-      return 0;
-    }
-    if (ch == 'c') {
-      if (!EMPTY (line))
-        parse_error ("comment without 'c' as first character of line");
-      while ((ch = next_char ()) != '\n')
-        if (ch == EOF)
-          parse_error ("end-of-file in comment");
-      continue;
-    }
-    if (ch == '\n') {
-      if (EMPTY (line))
-        parse_error ("empty line");
-      PUSH (line, 0);
-      return actual_type ? actual_type : default_type;
-    }
-    if ('a' <= ch && ch <= 'z') {
-      if (actual_type || !EMPTY (line))
-        parse_error ("misplaced '%c' in line", ch);
-      actual_type = ch;
-      continue;
-    }
     int sign;
     if (ch == '-') {
       ch = next_char ();
+      if (ch == '0')
+        parse_error ("expected non-zero digit after '-'");
+      if (!ISDIGIT (ch))
+        parse_error ("expected digit after '-'");
       sign = -1;
     } else {
+      if (!ISDIGIT (ch))
+        parse_error ("expected digit or '-'");
       sign = 1;
     }
-    (void) sign;
+    int idx = ch - '0';
+    while (ISDIGIT (ch = next_char ())) {
+      if (!idx)
+        parse_error ("invalid leading '0' digit");
+      if (INT_MAX / 10 < idx)
+        parse_error ("index too large");
+      idx *= 10;
+      int digit = ch - '0';
+      if (INT_MAX - digit < idx)
+        parse_error ("index too large");
+    }
+    assert (idx != INT_MIN);
+    int lit = sign * idx;
+    if (ch != ' ' && ch != '\n')
+      parse_error ("expected space or new-line after '%d'", lit);
+    PUSH (line, lit);
+    if (ch == '\n') {
+      PUSH (line, 0);
+      assert (actual_type);
+      return actual_type;
+    }
+    assert (ch == ' ');
+    ch = next_char ();
   }
 }
 
+static void print_line (int type) {
+  printf ("%c", type);
+  for (all_elements (int, lit, line))
+    printf (" %d", lit);
+  fputc ('\n', stdout);
+}
+
 static int next_query (void) {
-  set_input (inputs + 0);
-  if (!next_line ('i'))
-    return 0;
-  return 1;
+  set_file (files + 0);
+  int type;
+  while ((type = next_line ('i')) != 'a' && type != 'q')
+    print_line (type);
+  print_line ('q');
+  return 'q';
 }
 
 static void release (void) {
@@ -270,45 +300,46 @@ int main (int argc, char **argv) {
       verbosity = 1;
     else if (arg[0] == '-')
       die ("invalid command line option '%s' (try '-h')", arg);
-    else if (!inputs[0].name)
-      inputs[0].name = arg;
-    else if (!inputs[1].name)
-      inputs[1].name = arg;
-    else if (!inputs[2].name)
-      inputs[2].name = arg;
+    else if (!files[0].name)
+      files[0].name = arg;
+    else if (!files[1].name)
+      files[1].name = arg;
+    else if (!files[2].name)
+      files[2].name = arg;
     else
-      die ("too many inputs '%s', '%s', '%s' and '%s'", inputs[0].name,
-           inputs[1].name, inputs[2].name, arg);
+      die ("too many files '%s', '%s', '%s' and '%s'", files[0].name,
+           files[1].name, files[2].name, arg);
   }
-  if (!inputs[0].name)
+  if (!files[0].name)
     die ("no file given but expected three (try '-h')");
-  if (!inputs[1].name)
-    die ("only one file '%s' given but expected three (try '-h')",
-         inputs[0].name);
-  if (!inputs[2].name)
-    die (
-        "only two inputs '%s' and '%s' given but expected three (try '-h')",
-        inputs[0].name, inputs[1].name);
-  if (!(inputs[0].file = fopen (inputs[0].name, "r")))
-    die ("can not read incremental CNF file '%s'", inputs[0].name);
-  if (!(inputs[1].file = fopen (inputs[1].name, "r")))
-    die ("can not read answer file '%s'", inputs[1].name);
-  if (!(inputs[2].file = fopen (inputs[2].name, "r")))
-    die ("can not read incremental IDRUP proof file '%s'", inputs[2].name);
+  if (!files[1].name)
+    die ("one file '%s' given but expected three (try '-h')",
+         files[0].name);
+  if (!files[2].name)
+    die ("two files '%s' and '%s' given but expected three (try '-h')",
+         files[0].name, files[1].name);
+  if (!(files[0].file = fopen (files[0].name, "r")))
+    die ("can not read incremental CNF file '%s'", files[0].name);
+  if (!(files[1].file = fopen (files[1].name, "r")))
+    die ("can not read answer file '%s'", files[1].name);
+  if (!(files[2].file = fopen (files[2].name, "r")))
+    die ("can not read incremental IDRUP proof file '%s'", files[2].name);
 
   message ("Incremenal Drup Checker Version 0.0");
-  message ("reading incremental CNF '%s'", inputs[0].name);
-  message ("reading query answers from '%s'", inputs[1].name);
+  message ("reading incremental CNF '%s'", files[0].name);
+  message ("reading query answers from '%s'", files[1].name);
   message ("reading and checking incremental DRUP proof '%s'",
-           inputs[2].name);
+           files[2].name);
 
-  while (next_query ()) {
+  int type;
+  while ((type = next_query ())) {
+    assert (type == 'q');
   }
 
   for (int i = 0; i != 3; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",
-             inputs[i].name, inputs[i].lineno, inputs[i].charno);
-    fclose (inputs[i].file);
+             files[i].name, files[i].lineno, files[i].charno);
+    fclose (files[i].file);
   }
   release ();
   return 0;

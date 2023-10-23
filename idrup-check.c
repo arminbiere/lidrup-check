@@ -287,7 +287,6 @@ static void print_line (int type) {
 }
 
 static int next_query (void) {
-  set_file (files + 0);
   for (;;) {
     int type = next_line ('i');
     if (!type)
@@ -298,8 +297,10 @@ static int next_query (void) {
       type_error ("unexpected '%c' line", type);
     if (merge)
       print_line (type);
-    if (type == 'a' || type == 'q')
+    if (type == 'a' || type == 'q') {
+      COPY (int, query, line);
       return 'q';
+    }
   }
 }
 
@@ -355,6 +356,7 @@ int main (int argc, char **argv) {
            files[2].name);
 
   int type;
+  set_file (files + 0);
   while ((type = next_query ())) {
     assert (type == 'q');
   }

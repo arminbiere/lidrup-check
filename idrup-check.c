@@ -11,8 +11,8 @@ static const char * idrup_check_usage =
 "\n"
 "Two or three files are read, where '<icnf>' is the (incremental) CNF file\n"
 "with clauses and incremental queries under assumptions and '<answers>', if\n"
-"present, contains status messages and optionally model values or failed\n"
-"assumption clauses. Finally the '<proof>' file consists of (incrememental)\n"
+"present, contains status messages and model values or justifications for\n"
+"failed assumptions. Finally the '<proof>' file consists of (incrememental)\n"
 "DRUP proof lines.\n"
 ;
 

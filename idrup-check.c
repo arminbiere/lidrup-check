@@ -136,6 +136,10 @@ struct file {
   FILE *file;
   const char *name;
   size_t lineno, charno;
+  char buffer[1u << 20];
+  size_t end_buffer;
+  size_t size_buffer;
+  int end_of_file;
 };
 
 static struct file files[3];
@@ -144,34 +148,28 @@ static struct file *file;
 static struct ints line;
 static struct ints query;
 
-static char buffer[1u << 20];
-static size_t end_buffer;
-static size_t size_buffer;
-static int end_of_file;
-
 static void set_file (struct file *new_file) {
   assert (new_file);
   assert (new_file->file);
   file = new_file;
-  end_buffer = size_buffer = 0;
-  end_of_file = 0;
 }
 
 static int read_char (void) {
   assert (file);
   assert (file->file);
-  if (size_buffer == end_buffer) {
-    if (end_of_file)
+  if (file->size_buffer == file->end_buffer) {
+    if (file->end_of_file)
       return EOF;
-    end_buffer = fread (buffer, 1, sizeof buffer, file->file);
-    if (!end_buffer) {
-      end_of_file = 1;
+    file->end_buffer =
+        fread (file->buffer, 1, sizeof file->buffer, file->file);
+    if (!file->end_buffer) {
+      file->end_of_file = 1;
       return EOF;
     }
-    size_buffer = 0;
+    file->size_buffer = 0;
   }
-  assert (size_buffer < end_buffer);
-  return buffer[size_buffer++];
+  assert (file->size_buffer < file->end_buffer);
+  return file->buffer[file->size_buffer++];
 }
 
 static void parse_error (const char *, ...)
@@ -287,6 +285,7 @@ static void print_line (int type) {
 }
 
 static int next_query (void) {
+  set_file (files + 0);
   for (;;) {
     int type = next_line ('i');
     if (!type)
@@ -297,7 +296,7 @@ static int next_query (void) {
       type_error ("unexpected '%c' line", type);
     if (merge)
       print_line (type);
-    if (type == 'a' || type == 'q') {
+    if (type == 'q') {
       COPY (int, query, line);
       return 'q';
     }
@@ -356,7 +355,6 @@ int main (int argc, char **argv) {
            files[2].name);
 
   int type;
-  set_file (files + 0);
   while ((type = next_query ())) {
     assert (type == 'q');
   }

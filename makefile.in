@@ -2,7 +2,9 @@ COMPILE=@COMPILE@
 all: 
 	$(COMPILE) -o idrup-check idrup-check.c
 clean:
-	rm -f makefile idrup-check
+	rm -f makefile idrup-check test/*.log test/*.err
 format:
 	clang-format -i idrup-check.c
-.PHONY: all clean format
+test: all
+	./test/run.sh
+.PHONY: all clean format test

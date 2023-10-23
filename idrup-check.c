@@ -27,7 +27,6 @@ static void die(const char *fmt, ...) {
 struct {
   const char *name;
   FILE *file;
-  int close;
 } files[3];
 
 int main(int argc, char **argv) {
@@ -36,23 +35,31 @@ int main(int argc, char **argv) {
     if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
       fputs(idrup_check_usage, stdout);
       exit(0);
-    } else if (files[2].name)
-      die("too many files '%s', '%s', '%s' and '%s'", files[0].name,
-          files[1].name, files[2].name, arg);
-    else if (files[1].name)
+    } else if (!files[0].name)
+      files[0].name = arg;
+    else if (!files[1].name)
+      files[1].name = arg;
+    else if (!files[2].name)
       files[2].name = arg;
-    else if (files[0].name)
-      files[1].name = arg;
     else
-      files[1].name = arg;
+      die("too many files '%s', '%s', '%s' and '%s'", files[0].name,
+	  files[1].name, files[2].name, arg);
   }
   if (!files[0].name)
     die("no file given but expected three (try '-h')");
   if (!files[1].name)
     die("only one file '%s' given but expected three (try '-h')",
-        files[0].name);
+	files[0].name);
   if (!files[2].name)
     die("only two files '%s' and '%s' given but expected three (try '-h')",
-        files[0].name, files[1].name);
+	files[0].name, files[1].name);
+  if (!(files[0].file = fopen(files[0].name, "r")))
+    die("can not read incremental CNF file '%s'", files[0].name);
+  if (!(files[1].file = fopen(files[1].name, "r")))
+    die("can not read answer file '%s'", files[1].name);
+  if (!(files[2].file = fopen(files[2].name, "r")))
+    die("can not read incremental IDRUP proof file '%s'", files[2].name);
+  for (int i = 0; i != 3; i++)
+    fclose (files[i].file);
   return 0;
 }

@@ -38,5 +38,7 @@ run 0 unit1
 run 0 full1
 run 0 full2
 run 0 full3
+run 0 ifull1
+run 0 ifull2
 
 echo "all $passed tests passed"

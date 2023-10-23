@@ -298,7 +298,7 @@ static int next_query (void) {
       return 0;
     if (type == 'a')
       type = 'q';
-    else if (type != 'i')
+    else if (type != 'i' && type != 'q')
       type_error ("unexpected '%c' line", type);
     if (merge)
       print_line (type);

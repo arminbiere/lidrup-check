@@ -257,11 +257,8 @@ static int next_line (char default_type) {
     if (ch != ' ' && ch != '\n')
       parse_error ("expected space or new-line after '%d'", lit);
     PUSH (line, lit);
-    if (ch == '\n') {
-      PUSH (line, 0);
-      assert (actual_type);
+    if (ch == '\n')
       return actual_type;
-    }
     assert (ch == ' ');
     ch = next_char ();
   }
@@ -276,11 +273,14 @@ static void print_line (int type) {
 
 static int next_query (void) {
   set_file (files + 0);
-  int type;
-  while ((type = next_line ('i')) != 'a' && type != 'q')
+  for (;;) {
+    int type = next_line ('i');
+    if (!type)
+      return 0;
     print_line (type);
-  print_line ('q');
-  return 'q';
+    if (type == 'a' || type == 'q')
+      return 'q';
+  }
 }
 
 static void release (void) {

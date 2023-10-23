@@ -1,0 +1,53 @@
+#!/bin/sh
+
+usage () {
+cat<<EOF
+usage: configure [ <option> ... ]
+
+where '<option>' is one of the following
+
+-h | --help     print command line option summary
+-g | --debug    compile with full debugging support
+-s | --symbols  include symbol table (default for '-g')
+-c | --check    assertion checking (default for '-g')
+EOF
+exit 0
+}
+
+die () {
+  echo "configure: error: $*" 1>&2
+  exit 1
+}
+
+msg () {
+  echo "configure: $*"
+}
+
+debug=no
+symbols=unknown
+check=unknown
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -h | --help) usage;;
+    -g | --debug) debug=yes;;
+    -s | --symbols) symbols=yes;;
+    -c | --check) check=yes;;
+    *) die "invalid option '$1' (try '-h')";;
+  esac
+  shift
+done
+
+[ $check = undefined ] && check=$debug
+[ $symbols = undefined ] && symbols=$debug
+
+COMPILE="gcc -Wall"
+
+[ $check = no ] && COMPILE="$COMPILE -DNDEBUG"
+[ $symbols = yes ] && COMPILE="$COMPILE -ggdb3"
+[ $debug = no ] && COMPILE="$COMPILE -O3"
+
+msg "using '$COMPILE'"
+sed -e "s#@COMPILE@#$COMPILE#" makefile.in > makefile
+msg "generated 'makefile' (run 'make')"

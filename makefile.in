@@ -1,0 +1,6 @@
+COMPILE=@COMPILE@
+all:
+	@echo "no 'all' goal yet"; exit 1
+clean:
+	rm -f makefile
+.PHONY: all clean

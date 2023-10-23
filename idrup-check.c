@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * idrup_check_usage =
-"usage: idrup-check [ <option> ... ] <icnf> <answers> <proof>\n"
+"usage: idrup-check [ <option> ... ] <icnf> [ <answers> ] <proof>\n"
 "\n"
 "where '<option>' is one of the following\n"
 "\n"
@@ -9,10 +9,11 @@ static const char * idrup_check_usage =
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
 "\n"
-"and '<icnf>' is the incremental CNF file with file clauses and queries\n"
-"under assumptions, '<answers>' a file with status reports for queries\n"
-"with optional model values and failed assumption justifications and\n."
-"finally '<proof>' the incrememental DRUP proof lines.\n"
+"and reads two or three files, where '<icnf>' is the (incremental) CNF file\n"
+"with file clauses and incremental queries under assumptions, if present,\n"
+"the '<answers>' file contains status messages and optionally model values\n" 
+"or failed assumptions clauses, and finally the '<proof>' file consists of\n"
+"(incrememental) DRUP proof lines.\n"
 ;
 
 // clang-format on
@@ -49,6 +50,7 @@ static void out_of_memory (const char *fmt, ...) {
   exit (1);
 }
 
+static int merge = 1;
 static int verbosity = 0;
 
 static void message (const char *, ...)
@@ -191,6 +193,23 @@ static void parse_error (const char *fmt, ...) {
   exit (1);
 }
 
+static void type_error (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void type_error (const char *fmt, ...) {
+  assert (file);
+  assert (file->lineno);
+  fprintf (stderr,
+           "idrup-check: error: at line %zu in '%s': ", file->lineno,
+           file->name);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
+}
+
 static int next_char (void) {
   int res = read_char ();
   if (res == '\r') {
@@ -277,7 +296,12 @@ static int next_query (void) {
     int type = next_line ('i');
     if (!type)
       return 0;
-    print_line (type);
+    if (type == 'a')
+      type = 'q';
+    else if (type != 'i')
+      type_error ("unexpected '%c' line", type);
+    if (merge)
+      print_line (type);
     if (type == 'a' || type == 'q')
       return 'q';
   }
@@ -325,7 +349,10 @@ int main (int argc, char **argv) {
   if (!(files[2].file = fopen (files[2].name, "r")))
     die ("can not read incremental IDRUP proof file '%s'", files[2].name);
 
-  message ("Incremenal Drup Checker Version 0.0");
+  message ("Incremenal Drup Checker Version 0.0.0");
+  message ("Copyright (c) 2023 University of Freiburg");
+  if (verbosity >= 0)
+    fputs ("c\n", stdout);
   message ("reading incremental CNF '%s'", files[0].name);
   message ("reading query answers from '%s'", files[1].name);
   message ("reading and checking incremental DRUP proof '%s'",

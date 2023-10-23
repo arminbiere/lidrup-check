@@ -3,17 +3,17 @@
 static const char * idrup_check_usage =
 "usage: idrup-check [ <option> ... ] <icnf> [ <answers> ] <proof>\n"
 "\n"
-"where '<option>' is one of the following\n"
+"where '<option>' is one of the following options:\n"
 "\n"
 "  -h | --help     print command line option summary\n"
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
 "\n"
-"and reads two or three files, where '<icnf>' is the (incremental) CNF file\n"
-"with file clauses and incremental queries under assumptions, if present,\n"
-"the '<answers>' file contains status messages and optionally model values\n" 
-"or failed assumptions clauses, and finally the '<proof>' file consists of\n"
-"(incrememental) DRUP proof lines.\n"
+"Two or three files are read, where '<icnf>' is the (incremental) CNF file\n"
+"with clauses and incremental queries under assumptions and '<answers>', if\n"
+"present, contains status messages and optionally model values or failed\n"
+"assumption clauses. Finally the '<proof>' file consists of (incrememental)\n"
+"DRUP proof lines.\n"
 ;
 
 // clang-format on
@@ -85,10 +85,6 @@ static void verbose (const char *fmt, ...) {
 
 struct ints {
   int *begin, *end, *allocated;
-};
-
-struct lines {
-  int **begin, **end, **allocated;
 };
 
 #define BEGIN(S) (S).begin
@@ -347,7 +343,7 @@ int main (int argc, char **argv) {
   if (!(files[1].file = fopen (files[1].name, "r")))
     die ("can not read answer file '%s'", files[1].name);
   if (!(files[2].file = fopen (files[2].name, "r")))
-    die ("can not read incremental IDRUP proof file '%s'", files[2].name);
+    die ("can not read incremental DRUP proof file '%s'", files[2].name);
 
   message ("Incremenal Drup Checker Version 0.0.0");
   message ("Copyright (c) 2023 University of Freiburg");

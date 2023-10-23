@@ -24,8 +24,8 @@ msg () {
 }
 
 debug=no
-symbols=unknown
-check=unknown
+symbols=undefined
+check=undefined
 
 while [ $# -gt 0 ]
 do

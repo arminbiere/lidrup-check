@@ -1,6 +1,8 @@
 COMPILE=@COMPILE@
-all:
-	@echo "no 'all' goal yet"; exit 1
+all: 
+	$(COMPILE) -o idrup-check idrup-check.c
 clean:
-	rm -f makefile
-.PHONY: all clean
+	rm -f makefile idrup-check
+format:
+	clang-format -i idrup-check.c
+.PHONY: all clean format

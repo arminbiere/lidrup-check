@@ -12,7 +12,7 @@ static const char * idrup_check_usage =
 "Two or three files are read, where '<icnf>' is the (incremental) CNF file\n"
 "with clauses and incremental queries under assumptions and '<answers>', if\n"
 "present, contains status messages and model values or justifications for\n"
-"failed assumptions. Finally the '<proof>' file consists of (incrememental)\n"
+"failed assumptions. Finally the '<proof>' file consists of (incremental)\n"
 "DRUP proof lines.\n"
 ;
 
@@ -136,19 +136,24 @@ struct file {
   FILE *file;
   const char *name;
   size_t lineno, charno;
-  char buffer[1u << 20];
+  size_t start_of_line;
   size_t end_buffer;
   size_t size_buffer;
   int end_of_file;
+  char buffer[1u << 20];
 };
 
 static struct file files[3];
 static struct file *file;
 
+static struct file *icnf = files + 0;
+static struct file *proof = files + 1;
+static struct file *answers = files + 2;
+
 static struct ints line;
 static struct ints query;
 
-static void set_file (struct file *new_file) {
+static void set_file_to (struct file *new_file) {
   assert (new_file);
   assert (new_file->file);
   file = new_file;
@@ -194,8 +199,8 @@ static void type_error (const char *fmt, ...) {
   assert (file);
   assert (file->lineno);
   fprintf (stderr,
-           "idrup-check: error: at line %zu in '%s': ", file->lineno,
-           file->name);
+           "idrup-check: error: at line %zu in '%s': ",
+	   file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -233,6 +238,7 @@ static int next_line (char default_type) {
     return 0;
   if (ch == '\n')
     parse_error ("unexpected empty line");
+  file->start_of_line = file->lineno;
   if ('a' <= ch && ch <= 'z') {
     actual_type = ch;
     if ((ch = next_char ()) != ' ')
@@ -285,7 +291,7 @@ static void print_line (int type) {
 }
 
 static int next_query (void) {
-  set_file (files + 0);
+  set_file_to (icnf);
   for (;;) {
     int type = next_line ('i');
     if (!type)
@@ -301,6 +307,17 @@ static int next_query (void) {
       return 'q';
     }
   }
+}
+
+static int next_answer (void) {
+  set_file_to (answers);
+  int type = next_line (0);
+  return 0;
+}
+
+static int next_status (void) {
+  set_file_to (proof);
+  return 0;
 }
 
 static void release (void) {
@@ -345,7 +362,7 @@ int main (int argc, char **argv) {
   if (!(files[2].file = fopen (files[2].name, "r")))
     die ("can not read incremental DRUP proof file '%s'", files[2].name);
 
-  message ("Incremenal Drup Checker Version 0.0.0");
+  message ("Incremental DRUP Checker Version 0.0.0");
   message ("Copyright (c) 2023 University of Freiburg");
   if (verbosity >= 0)
     fputs ("c\n", stdout);
@@ -354,10 +371,15 @@ int main (int argc, char **argv) {
   message ("reading and checking incremental DRUP proof '%s'",
            files[2].name);
 
-  int type;
-  while ((type = next_query ())) {
-    assert (type == 'q');
+  int query_type;
+
+  while ((query_type = next_query ())) {
+    assert (query_type == 'q');
   }
+
+  int answer_type = next_answer ();
+  if (answer_type)
+    type_error ("unexpected '%c' line", answer_type);
 
   for (int i = 0; i != 3; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",

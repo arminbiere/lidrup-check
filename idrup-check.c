@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * idrup_check_usage =
-"usage: idrup-check [ <option> ... ] [ <icnf> ] [ <proof> ]\n"
+"usage: idrup-check [ <option> ... ] <icnf> <proof>\n"
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
@@ -9,13 +9,11 @@ static const char * idrup_check_usage =
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
 "\n"
-"One or two files are read, where '<icnf>' is the (incremental) CNF file\n"
-"potentially augmented with all interactions between the user and the SAT\n"
-"solver.  The '<proof>' file is meant to be a super-set of the interactions\n"
-"but additionally has all the low level proof steps.  The checker makes sure\n"
-"that the interactions match the proof and all the proof steps are justified.\n"
-"If only one file is specified the checker assumes it to be a '<proof>' file.\n"
-"Without any file the proof is read from '<stdin>'.\n"
+"Exactly two files are read, where '<icnf>' is an incremental CNF file\n"
+"augmented with all interactions between the user and the SAT solver.\n"
+"The '<proof>' file is meant to be a super-set of the interactions\n"
+"but additionally has all the low level proof steps.  The checker makes\n"
+"sure the interactions match the proof and all proof steps are justified.\n"
 ;
 
 // clang-format on
@@ -144,7 +142,7 @@ struct file {
   int end_of_file;
 };
 
-static struct file files[3];
+static struct file files[2];
 static struct file *file;
 
 static struct ints line;
@@ -326,42 +324,33 @@ int main (int argc, char **argv) {
       files[0].name = arg;
     else if (!files[1].name)
       files[1].name = arg;
-    else if (!files[2].name)
-      files[2].name = arg;
     else
-      die ("too many files '%s', '%s', '%s' and '%s'", files[0].name,
-           files[1].name, files[2].name, arg);
+      die ("too many files '%s', '%s' and '%s'", files[0].name,
+           files[1].name, arg);
   }
   if (!files[0].name)
-    die ("no file given but expected three (try '-h')");
+    die ("no file given but expected two (try '-h')");
   if (!files[1].name)
-    die ("one file '%s' given but expected three (try '-h')",
-         files[0].name);
-  if (!files[2].name)
-    die ("two files '%s' and '%s' given but expected three (try '-h')",
-         files[0].name, files[1].name);
+    die ("one file '%s' given but expected two (try '-h')", files[0].name);
   if (!(files[0].file = fopen (files[0].name, "r")))
     die ("can not read incremental CNF file '%s'", files[0].name);
   if (!(files[1].file = fopen (files[1].name, "r")))
-    die ("can not read answer file '%s'", files[1].name);
-  if (!(files[2].file = fopen (files[2].name, "r")))
-    die ("can not read incremental DRUP proof file '%s'", files[2].name);
+    die ("can not read incremental DRUP proof file '%s'", files[1].name);
 
   message ("Incremenal Drup Checker Version 0.0.0");
   message ("Copyright (c) 2023 University of Freiburg");
   if (verbosity >= 0)
     fputs ("c\n", stdout);
   message ("reading incremental CNF '%s'", files[0].name);
-  message ("reading query answers from '%s'", files[1].name);
   message ("reading and checking incremental DRUP proof '%s'",
-           files[2].name);
+           files[1].name);
 
   int type;
   while ((type = next_query ())) {
     assert (type == 'q');
   }
 
-  for (int i = 0; i != 3; i++) {
+  for (int i = 0; i != 2; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",
              files[i].name, files[i].lineno, files[i].charno);
     fclose (files[i].file);

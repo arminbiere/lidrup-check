@@ -19,11 +19,10 @@ run () {
   shift
   base="$1"
   icnf=test/$base.icnf
-  answers=test/$base.answers
   proof=test/$base.proof
   log=test/$base.log
   err=test/$base.err
-  cmd="./$binary $icnf $answers $proof"
+  cmd="./$binary $icnf $proof"
   echo "$cmd"
   $cmd 1>$log 2>$err
   actual=$?

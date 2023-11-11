@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * idrup_check_usage =
-"usage: idrup-check [ <option> ... ] <icnf> [ <answers> ] <proof>\n"
+"usage: idrup-check [ <option> ... ] [ <icnf> ] [ <proof> ]\n"
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
@@ -9,11 +9,13 @@ static const char * idrup_check_usage =
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
 "\n"
-"Two or three files are read, where '<icnf>' is the (incremental) CNF file\n"
-"with clauses and incremental queries under assumptions and '<answers>', if\n"
-"present, contains status messages and model values or justifications for\n"
-"failed assumptions. Finally the '<proof>' file consists of (incrememental)\n"
-"DRUP proof lines.\n"
+"One or two files are read, where '<icnf>' is the (incremental) CNF file\n"
+"potentially augmented with all interactions between the user and the SAT\n"
+"solver.  The '<proof>' file is meant to be a super-set of the interactions\n"
+"but additionally has all the low level proof steps.  The checker makes sure\n"
+"that the interactions match the proof and all the proof steps are justified.\n"
+"If only one file is specified the checker assumes it to be a '<proof>' file.\n"
+"Without any file the proof is read from '<stdin>'.\n"
 ;
 
 // clang-format on

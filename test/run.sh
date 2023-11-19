@@ -26,8 +26,17 @@ run () {
   echo "$cmd"
   $cmd 1>$log 2>$err
   actual=$?
-  [ $actual = $expected ] || \
+  if [ ! $actual = $expected ]
+  then
+    echo
     die "exit status '$actual' but expected '$expected'"
+  fi
+  if test $actual = 0
+  then
+    echo " # succeeded"
+  else
+    echo " # failed as expected"
+  fi
   passed=`expr $passed + 1`
 }
 
@@ -38,6 +47,7 @@ run 0 full1
 run 0 full2
 run 0 full3
 run 0 ifull1
-run 0 ifull2
+run 1 ifull2
+run 0 ifull3
 
 echo "all $passed tests passed"

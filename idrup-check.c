@@ -144,10 +144,11 @@ struct file {
   FILE *file;
   const char *name;
   size_t lineno, charno;
-  char buffer[1u << 20];
+  size_t start_of_line;
   size_t end_buffer;
   size_t size_buffer;
   int end_of_file;
+  char buffer[1u << 20];
 };
 
 static struct file files[2];
@@ -191,7 +192,7 @@ static void parse_error (const char *, ...)
 static void parse_error (const char *fmt, ...) {
   assert (file);
   fprintf (stderr, "idrup-check: parse error: at line %zu in '%s': ",
-           file->lineno + 1, file->name);
+           file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -205,10 +206,9 @@ static void type_error (const char *, ...)
 
 static void type_error (const char *fmt, ...) {
   assert (file);
-  assert (file->lineno);
   fprintf (stderr,
-           "idrup-check: error: at line %zu in '%s': ", file->lineno,
-           file->name);
+           "idrup-check: error: at line %zu in '%s': ",
+	   file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -220,8 +220,9 @@ static void type_error (const char *fmt, ...) {
 #ifndef NDEBUG
 
 static void print_parsed_line (int type) {
+  if (verbosity < INT_MAX)
+    return;
   assert (file);
-  assert (file->lineno);
   printf ("c parsed line %zu in '%s': ", file->lineno,
            file->name);
   switch (type) {
@@ -282,6 +283,7 @@ static int next_line_without_printing (char default_type) {
   }
   if (ch == '\n')
     parse_error ("unexpected empty line");
+  file->start_of_line = file->lineno;
   if ('a' <= ch && ch <= 'z') {
     actual_type = ch;
     if ((ch = next_char ()) != ' ')
@@ -335,7 +337,7 @@ static inline int next_line (char default_type) {
 #if 0
 
 static int next_query (void) {
-  set_file (files + 0);
+  set_file_to (icnf);
   for (;;) {
     int type = next_line ('i');
     if (!type)
@@ -460,7 +462,7 @@ int main (int argc, char **argv) {
   if (!(files[1].file = fopen (files[1].name, "r")))
     die ("can not read incremental DRUP proof file '%s'", files[1].name);
 
-  message ("Incremenal Drup Checker Version 0.0.0");
+  message ("Incremental DRUP Checker Version 0.0.0");
   message ("Copyright (c) 2023 University of Freiburg");
   if (verbosity >= 0)
     fputs ("c\n", stdout);

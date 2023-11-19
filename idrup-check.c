@@ -8,6 +8,7 @@ static const char * idrup_check_usage =
 "  -h | --help     print command line option summary\n"
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
+"  -l | --logging  enable very verbose logging\n"
 "\n"
 "Exactly two files are read, where '<icnf>' is an incremental CNF file\n"
 "augmented with all interactions between the user and the SAT solver.\n"
@@ -50,7 +51,7 @@ static void out_of_memory (const char *fmt, ...) {
   exit (1);
 }
 
-static int merge = 1;
+// static int merge = 1;
 static int verbosity = 0;
 
 static void message (const char *, ...)
@@ -68,20 +69,27 @@ static void message (const char *fmt, ...) {
   fflush (stdout);
 }
 
-static void verbose (const char *, ...)
-    __attribute__ ((format (printf, 1, 2)));
+#define verbose(...) \
+  do { \
+    if (verbosity >= 1) \
+      message (__VA_ARGS__); \
+  } while (0)
 
-static void verbose (const char *fmt, ...) {
-  if (verbosity < 1)
-    return;
-  fputs ("c ", stdout);
-  va_list ap;
-  va_start (ap, fmt);
-  vprintf (fmt, ap);
-  va_end (ap);
-  fputc ('\n', stdout);
-  fflush (stdout);
-}
+#ifndef NDEBUG
+
+#define debug(...) \
+  do { \
+    if (verbosity == INT_MAX) \
+      message ("DEBUG " __VA_ARGS__); \
+  } while (0)
+
+#else
+
+#define debug(...) \
+  do { \
+  } while (false)
+
+#endif
 
 struct ints {
   int *begin, *end, *allocated;
@@ -143,12 +151,17 @@ struct file {
 };
 
 static struct file files[2];
+static struct file *interactions = files + 0;
+static struct file *proof = files + 1;
 static struct file *file;
 
-static struct ints line;
-static struct ints query;
+static struct ints iline;
+static struct ints pline;
 
-static void set_file (struct file *new_file) {
+static struct ints line;
+static const char * status;
+
+static inline void set_file (struct file *new_file) {
   assert (new_file);
   assert (new_file->file);
   file = new_file;
@@ -204,6 +217,38 @@ static void type_error (const char *fmt, ...) {
   exit (1);
 }
 
+#ifndef NDEBUG
+
+static void print_parsed_line (int type) {
+  assert (file);
+  assert (file->lineno);
+  printf ("c parsed line %zu in '%s': ", file->lineno,
+           file->name);
+  switch (type) {
+    case 's':
+      fputs ("s ", stdout);
+      assert (status);
+      fputs (status, stdout);
+      break;
+    case 0:
+      fputs ("<end-of-file>", stdout);
+      break;
+    default:
+      fputc (type, stdout);
+      for (const int * p = line.begin; p != line.end; p++)
+	printf (" %d", *p);
+    break;
+  }
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
+#else
+
+#define print_parsed_line (...) do { } while (false)
+
+#endif
+
 static int next_char (void) {
   int res = read_char ();
   if (res == '\r') {
@@ -220,17 +265,21 @@ static int next_char (void) {
 
 static int ISDIGIT (int ch) { return '0' <= ch && ch <= '9'; }
 
-static int next_line (char default_type) {
+static int next_line_without_printing (char default_type) {
   assert (default_type);
   int actual_type = 0;
   CLEAR (line);
   int ch;
-  while ((ch = next_char ()) == 'c')
+  while ((ch = next_char ()) == 'c') {
+    debug ("skipping comment line");
     while ((ch = next_char ()) != '\n')
       if (ch == EOF)
         parse_error ("end-of-file in comment");
-  if (ch == EOF)
+  }
+  if (ch == EOF) {
+    debug ("found end-of-line");
     return 0;
+  }
   if (ch == '\n')
     parse_error ("unexpected empty line");
   if ('a' <= ch && ch <= 'z') {
@@ -277,12 +326,13 @@ static int next_line (char default_type) {
   }
 }
 
-static void print_line (int type) {
-  printf ("%c", type);
-  for (all_elements (int, lit, line))
-    printf (" %d", lit);
-  fputc ('\n', stdout);
+static inline int next_line (char default_type) {
+  int type = next_line_without_printing (default_type);
+  print_parsed_line (type);
+  return type;
 }
+
+#if 0
 
 static int next_query (void) {
   set_file (files + 0);
@@ -302,10 +352,81 @@ static int next_query (void) {
     }
   }
 }
+#endif
+
+static void parse_and_check () {
+  int type;
+  {
+  INTERACTION_INPUT:
+    set_file (interactions);
+    type = next_line ('i');
+    switch (type) {
+    case 'i':
+      COPY (int, iline, line);
+      goto PROOF_INPUT;
+    case 'q':
+      COPY (int, iline, line);
+      goto PROOF_QUERY;
+    case 0:
+      goto INTERACTION_COMPLETED;
+    default:
+      type_error ("unexpected '%c' line (expected 'i' or 'q' line)", type);
+    }
+  }
+  {
+  INTERACTION_COMPLETED:
+    return;
+  }
+  {
+  PROOF_INPUT:
+    set_file (proof);
+    type = next_line ('i');
+    if (type == 'i') {
+      if (SIZE (line) != SIZE (iline))
+      INPUT_LINE_DOES_NOT_MATCH:
+        type_error ("input line does not match");
+      const int *const end = iline.end;
+      const int *p = iline.begin;
+      const int *q = line.begin;
+      while (p != end)
+        if (*p != *q)
+          goto INPUT_LINE_DOES_NOT_MATCH;
+        else
+          p++, q++;
+      goto INTERACTION_INPUT;
+    } else if (type)
+      type_error ("unexpected '%c' line (expected 'i' line)", type);
+    else
+      type_error ("unexpected end-of-file (expected 'i' line)");
+  }
+  {
+  PROOF_QUERY:
+    set_file (proof);
+    type = next_line ('i');
+    if (type == 'q') {
+      if (SIZE (line) != SIZE (iline))
+      QUERY_LINE_DOES_NOT_MATCH:
+        type_error ("query line does not match");
+      const int *const end = iline.end;
+      const int *p = iline.begin;
+      const int *q = line.begin;
+      while (p != end)
+        if (*p != *q)
+          goto QUERY_LINE_DOES_NOT_MATCH;
+        else
+          p++, q++;
+      goto INTERACTION_INPUT;
+    } else if (type)
+      type_error ("unexpected %c line (expected 'q' line)", type);
+    else
+      type_error ("unexpected end-of-file (expected 'q' line)");
+  }
+}
 
 static void release (void) {
   RELEASE (line);
-  RELEASE (query);
+  RELEASE (iline);
+  RELEASE (pline);
 }
 
 int main (int argc, char **argv) {
@@ -317,7 +438,9 @@ int main (int argc, char **argv) {
     } else if (!strcmp (arg, "-q") || !strcmp (arg, "--quiet"))
       verbosity = -1;
     else if (!strcmp (arg, "-v") || !strcmp (arg, "--verbose"))
-      verbosity = 1;
+      verbosity += (verbosity < INT_MAX);
+    else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging"))
+      verbosity = INT_MAX;
     else if (arg[0] == '-')
       die ("invalid command line option '%s' (try '-h')", arg);
     else if (!files[0].name)
@@ -345,10 +468,7 @@ int main (int argc, char **argv) {
   message ("reading and checking incremental DRUP proof '%s'",
            files[1].name);
 
-  int type;
-  while ((type = next_query ())) {
-    assert (type == 'q');
-  }
+  parse_and_check ();
 
   for (int i = 0; i != 2; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",

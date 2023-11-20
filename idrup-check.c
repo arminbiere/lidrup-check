@@ -320,7 +320,7 @@ static int next_line_without_printing (char default_type) {
         parse_error ("expected new-line after status");
       status = SATISFIABLE;
     } else if (ch == 'U') {
-      for (const char *p = "ATISFIABLE"; *p; p++)
+      for (const char *p = "NSATISFIABLE"; *p; p++)
         if (*p != next_char ())
           goto INVALID_STATUS_LINE;
       if (next_char () != '\n')

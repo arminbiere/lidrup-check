@@ -23,12 +23,12 @@ run () {
   log=test/$base.log
   err=test/$base.err
   cmd="./$binary $icnf $proof"
-  echo "$cmd"
+  printf "%s" "$cmd"
   $cmd 1>$log 2>$err
   actual=$?
   if [ ! $actual = $expected ]
   then
-    echo
+    echo " # FAILED"
     die "exit status '$actual' but expected '$expected'"
   fi
   if test $actual = 0

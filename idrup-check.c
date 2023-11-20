@@ -20,6 +20,7 @@ static const char * idrup_check_usage =
 // clang-format on
 
 #include <assert.h>
+#include <ctype.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -87,7 +88,7 @@ static void message (const char *fmt, ...) {
 
 #define debug(...) \
   do { \
-  } while (false)
+  } while (0)
 
 #endif
 
@@ -160,7 +161,9 @@ static struct ints iline;
 static struct ints pline;
 
 static struct ints line;
-static const char * status;
+static const char *SATISFIABLE = "SATISFIABLE";
+static const char *UNSATISFIABLE = "UNSATISFIABLE";
+static const char *status;
 
 static inline void set_file (struct file *new_file) {
   assert (new_file);
@@ -206,9 +209,8 @@ static void type_error (const char *, ...)
 
 static void type_error (const char *fmt, ...) {
   assert (file);
-  fprintf (stderr,
-           "idrup-check: error: at line %zu in '%s': ",
-	   file->start_of_line, file->name);
+  fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
+           file->start_of_line + 1, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -223,21 +225,20 @@ static void print_parsed_line (int type) {
   if (verbosity < INT_MAX)
     return;
   assert (file);
-  printf ("c parsed line %zu in '%s': ", file->lineno,
-           file->name);
+  printf ("c parsed line %zu in '%s': ", file->lineno, file->name);
   switch (type) {
-    case 's':
-      fputs ("s ", stdout);
-      assert (status);
-      fputs (status, stdout);
-      break;
-    case 0:
-      fputs ("<end-of-file>", stdout);
-      break;
-    default:
-      fputc (type, stdout);
-      for (const int * p = line.begin; p != line.end; p++)
-	printf (" %d", *p);
+  case 's':
+    fputs ("s ", stdout);
+    assert (status);
+    fputs (status, stdout);
+    break;
+  case 0:
+    fputs ("<end-of-file>", stdout);
+    break;
+  default:
+    fputc (type, stdout);
+    for (const int *p = line.begin; p != line.end; p++)
+      printf (" %d", *p);
     break;
   }
   fputc ('\n', stdout);
@@ -246,7 +247,9 @@ static void print_parsed_line (int type) {
 
 #else
 
-#define print_parsed_line (...) do { } while (false)
+#define print_parsed_line(...) \
+  do { \
+  } while (0)
 
 #endif
 
@@ -267,15 +270,17 @@ static int next_char (void) {
 static int ISDIGIT (int ch) { return '0' <= ch && ch <= '9'; }
 
 static int next_line_without_printing (char default_type) {
-  assert (default_type);
   int actual_type = 0;
   CLEAR (line);
+  file->start_of_line = file->lineno;
   int ch;
   while ((ch = next_char ()) == 'c') {
-    debug ("skipping comment line");
     while ((ch = next_char ()) != '\n')
       if (ch == EOF)
         parse_error ("end-of-file in comment");
+    if (verbosity == INT_MAX)
+      message ("skipped line %zu in '%s' (comment)",
+               file->start_of_line + 1, file->name);
   }
   if (ch == EOF) {
     debug ("found end-of-line");
@@ -283,14 +288,40 @@ static int next_line_without_printing (char default_type) {
   }
   if (ch == '\n')
     parse_error ("unexpected empty line");
-  file->start_of_line = file->lineno;
+  // TODO add support for 'p cnf <vars> <clauses>' and 'p icnf' headers.
   if ('a' <= ch && ch <= 'z') {
     actual_type = ch;
     if ((ch = next_char ()) != ' ')
       parse_error ("expected space after '%c'", actual_type);
     ch = next_char ();
+  } else if (!default_type) {
+    if (isprint (ch))
+      parse_error ("unexpected character '%c'", ch);
+    else
+      parse_error ("unexpected character coder %02x", (int) ch);
   } else
     actual_type = default_type;
+  if (actual_type == 's') {
+    if (ch == 'S') {
+      for (const char *p = "ATISFIABLE"; *p; p++)
+        if (*p != next_char ())
+        INVALID_STATUS_LINE:
+          parse_error ("invalid status line");
+      if (next_char () != '\n')
+      EXPECTED_NEW_LINE_AFTER_STATUS:
+        parse_error ("expected new-line after status");
+      status = SATISFIABLE;
+    } else if (ch == 'U') {
+      for (const char *p = "ATISFIABLE"; *p; p++)
+        if (*p != next_char ())
+          goto INVALID_STATUS_LINE;
+      if (next_char () != '\n')
+        goto EXPECTED_NEW_LINE_AFTER_STATUS;
+      status = UNSATISFIABLE;
+    } else
+      goto INVALID_STATUS_LINE;
+    return 's';
+  }
   for (;;) {
     int sign;
     if (ch == '-') {
@@ -321,7 +352,7 @@ static int next_line_without_printing (char default_type) {
     if (ch != ' ' && ch != '\n')
       parse_error ("expected space or new-line after '%d'", lit);
     PUSH (line, lit);
-    if (ch == '\n')
+    if (ch == '\n') // TODO what about continued lines (like 'v' lines)?
       return actual_type;
     assert (ch == ' ');
     ch = next_char ();
@@ -334,27 +365,12 @@ static inline int next_line (char default_type) {
   return type;
 }
 
-#if 0
-
-static int next_query (void) {
-  set_file_to (icnf);
-  for (;;) {
-    int type = next_line ('i');
-    if (!type)
-      return 0;
-    if (type == 'a')
-      type = 'q';
-    else if (type != 'i' && type != 'q')
-      type_error ("unexpected '%c' line", type);
-    if (merge)
-      print_line (type);
-    if (type == 'q') {
-      COPY (int, query, line);
-      return 'q';
-    }
-  }
+static void unexpected_line (int type, const char *expected) {
+  if (type)
+    type_error ("unexpected '%c' line (expected %s line)", type, expected);
+  else
+    type_error ("unexpected end-of-file (expected %s line)", expected);
 }
-#endif
 
 static void parse_and_check () {
   int type;
@@ -372,7 +388,7 @@ static void parse_and_check () {
     case 0:
       goto INTERACTION_COMPLETED;
     default:
-      type_error ("unexpected '%c' line (expected 'i' or 'q' line)", type);
+      unexpected_line (type, "'i' Or 'q'");
     }
   }
   {
@@ -383,45 +399,51 @@ static void parse_and_check () {
   PROOF_INPUT:
     set_file (proof);
     type = next_line ('i');
-    if (type == 'i') {
-      if (SIZE (line) != SIZE (iline))
-      INPUT_LINE_DOES_NOT_MATCH:
-        type_error ("input line does not match");
-      const int *const end = iline.end;
-      const int *p = iline.begin;
-      const int *q = line.begin;
-      while (p != end)
-        if (*p != *q)
-          goto INPUT_LINE_DOES_NOT_MATCH;
-        else
-          p++, q++;
-      goto INTERACTION_INPUT;
-    } else if (type)
-      type_error ("unexpected '%c' line (expected 'i' line)", type);
-    else
-      type_error ("unexpected end-of-file (expected 'i' line)");
+    if (type != 'i')
+      unexpected_line (type, "'i'");
+    if (SIZE (line) != SIZE (iline))
+    INPUT_LINE_DOES_NOT_MATCH:
+      type_error ("input line does not match");
+    const int *const end = iline.end;
+    const int *p = iline.begin;
+    const int *q = line.begin;
+    while (p != end)
+      if (*p != *q)
+        goto INPUT_LINE_DOES_NOT_MATCH;
+      else
+        p++, q++;
+    goto INTERACTION_INPUT;
   }
   {
   PROOF_QUERY:
     set_file (proof);
-    type = next_line ('i');
-    if (type == 'q') {
-      if (SIZE (line) != SIZE (iline))
-      QUERY_LINE_DOES_NOT_MATCH:
-        type_error ("query line does not match");
-      const int *const end = iline.end;
-      const int *p = iline.begin;
-      const int *q = line.begin;
-      while (p != end)
-        if (*p != *q)
-          goto QUERY_LINE_DOES_NOT_MATCH;
-        else
-          p++, q++;
-      goto INTERACTION_INPUT;
-    } else if (type)
-      type_error ("unexpected %c line (expected 'q' line)", type);
-    else
-      type_error ("unexpected end-of-file (expected 'q' line)");
+    type = next_line (0);
+    if (type != 'q')
+      unexpected_line (type, "'q'");
+    if (SIZE (line) != SIZE (iline))
+    QUERY_LINE_DOES_NOT_MATCH:
+      type_error ("query line does not match");
+    const int *const end = iline.end;
+    const int *p = iline.begin;
+    const int *q = line.begin;
+    while (p != end)
+      if (*p != *q)
+        goto QUERY_LINE_DOES_NOT_MATCH;
+      else
+        p++, q++;
+    // PROOF_STATUS:
+    type = next_line (0);
+    if (type != 's')
+      unexpected_line (type, "'s'");
+    const char *proof_status = status;
+    // INTERACTION_STATUS:
+    set_file (interactions);
+    type = next_line (0);
+    if (type != 's')
+      unexpected_line (type, "'s'");
+    if (status != proof_status)
+      type_error ("unexpected '%s' status (expected '%s')", status,
+                  proof_status);
   }
 }
 

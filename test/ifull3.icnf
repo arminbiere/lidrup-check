@@ -1,12 +1,17 @@
-i -1 -2 -3 0
-i -1 -2 3 0
-i -1 2 -3 0
-i -1 2 3 0
+-1 -2 -3 0
+-1 -2 3 0
+-1 2 -3 0
+-1 2 3 0
 q 0
+s SATISFIABLE
+v -1 0
 i 1 2 -3 0
 i 1 2 3 0
 q 0
+s SATISFIABLE
 i 1 -2 -3 0
 q 0
+s SATISFIABLE
 i 1 -2 3 0
 q 0
+s UNSATISFIABLE

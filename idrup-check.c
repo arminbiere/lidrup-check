@@ -279,11 +279,13 @@ static int next_line_without_printing (char default_type) {
       if (ch == EOF)
         parse_error ("end-of-file in comment");
     if (verbosity == INT_MAX)
-      message ("skipped line %zu in '%s' (comment)",
-               file->start_of_line + 1, file->name);
+      message ("skipped line %zu in '%s': c...", file->start_of_line + 1,
+               file->name);
   }
   if (ch == EOF) {
-    debug ("found end-of-line");
+    if (verbosity == INT_MAX)
+      message ("parsed end-of-file in '%s' after %zu lines", file->name,
+               file->lineno);
     return 0;
   }
   if (ch == '\n')
@@ -352,7 +354,7 @@ static int next_line_without_printing (char default_type) {
     if (ch != ' ' && ch != '\n')
       parse_error ("expected space or new-line after '%d'", lit);
     PUSH (line, lit);
-    if (ch == '\n') // TODO what about continued lines (like 'v' lines)?
+    if (ch == '\n') // TODO what about continued lines (e.g., 'v' lines)?
       return actual_type;
     assert (ch == ' ');
     ch = next_char ();

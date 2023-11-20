@@ -442,6 +442,13 @@ static void parse_and_check () {
     PROOF_STATUS:
     type = next_line ('l');
     if (type == 'l') {
+      // PROOF_LEMMA:
+      goto PROOF_STATUS;
+    } else if (type == 'd') {
+      // PROOF_DELETE:
+      goto PROOF_STATUS;
+    } else if (type == 'w') {
+      // PROOF_WEAKEN:
       goto PROOF_STATUS;
     } else if (type == 's') {
       // INTERACTION_STATUS:

@@ -278,19 +278,25 @@ static int next_line_without_printing (char default_type) {
     while ((ch = next_char ()) != '\n')
       if (ch == EOF)
         parse_error ("end-of-file in comment");
+#ifndef NDEBUG
     if (verbosity == INT_MAX)
       message ("skipped line %zu in '%s': c...", file->start_of_line + 1,
                file->name);
+#endif
   }
   if (ch == EOF) {
+#ifndef NDEBUG
     if (verbosity == INT_MAX)
       message ("parsed end-of-file in '%s' after %zu lines", file->name,
                file->lineno);
+#endif
     return 0;
   }
   if (ch == '\n')
-    parse_error ("unexpected empty line");
+    parse_error ("unexpected empty line"); // TODO allow?
+
   // TODO add support for 'p cnf <vars> <clauses>' and 'p icnf' headers.
+
   if ('a' <= ch && ch <= 'z') {
     actual_type = ch;
     if ((ch = next_char ()) != ' ')
@@ -433,19 +439,22 @@ static void parse_and_check () {
         goto QUERY_LINE_DOES_NOT_MATCH;
       else
         p++, q++;
-    // PROOF_STATUS:
-    type = next_line (0);
-    if (type != 's')
+    PROOF_STATUS:
+    type = next_line ('l');
+    if (type == 'l') {
+      goto PROOF_STATUS;
+    } else if (type == 's') {
+      // INTERACTION_STATUS:
+      const char *proof_status = status;
+      set_file (interactions);
+      type = next_line (0);
+      if (type != 's')
+        unexpected_line (type, "'s'");
+      if (status != proof_status)
+        type_error ("unexpected '%s' status (expected '%s')", status,
+                    proof_status);
+    } else
       unexpected_line (type, "'s'");
-    const char *proof_status = status;
-    // INTERACTION_STATUS:
-    set_file (interactions);
-    type = next_line (0);
-    if (type != 's')
-      unexpected_line (type, "'s'");
-    if (status != proof_status)
-      type_error ("unexpected '%s' status (expected '%s')", status,
-                  proof_status);
   }
 }
 

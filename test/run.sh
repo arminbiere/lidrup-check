@@ -47,7 +47,7 @@ run 0 full1
 run 0 full2
 run 0 full3
 run 0 ifull1
-run 1 ifull2
+run 0 ifull2
 run 0 ifull3
 
 echo "all $passed tests passed"

@@ -1,0 +1,12 @@
+i 1 2 0
+i 1 -2 0
+q 0
+s SATISFIABLE
+v 1 2 0
+i -1 2 0
+i -1 -2 0
+q 0
+l 1 0
+l 0
+s UNSATISFIABLE
+

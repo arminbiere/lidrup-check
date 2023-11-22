@@ -274,6 +274,7 @@ static int next_line_without_printing (char default_type) {
   CLEAR (line);
   file->start_of_line = file->lineno;
   int ch;
+RESTART:
   while ((ch = next_char ()) == 'c') {
     while ((ch = next_char ()) != '\n')
       if (ch == EOF)
@@ -293,7 +294,7 @@ static int next_line_without_printing (char default_type) {
     return 0;
   }
   if (ch == '\n')
-    parse_error ("unexpected empty line"); // TODO allow?
+    goto RESTART;
 
   // TODO add support for 'p cnf <vars> <clauses>' and 'p icnf' headers.
 

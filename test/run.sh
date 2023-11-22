@@ -19,7 +19,7 @@ run () {
   shift
   base="$1"
   icnf=test/$base.icnf
-  proof=test/$base.proof
+  proof=test/$base.idrup
   log=test/$base.log
   err=test/$base.err
   cmd="./$binary $icnf $proof"
@@ -48,6 +48,8 @@ run 0 full2
 run 0 full3
 run 0 ifull1
 run 0 ifull2
-run 0 ifull3
+run 0 dp2
+run 0 dp3
+run 0 dp4
 
 echo "all $passed tests passed"

@@ -27,6 +27,8 @@ debug=no
 symbols=undefined
 check=undefined
 
+TARGETS="idrup-check"
+
 while [ $# -gt 0 ]
 do
   case "$1" in
@@ -34,6 +36,7 @@ do
     -g | --debug) debug=yes;;
     -s | --symbols) symbols=yes;;
     -c | --check) check=yes;;
+    -p | --pdf) TARGETS="$TARGETS idrup-check.pdf";;
     *) die "invalid option '$1' (try '-h')";;
   esac
   shift
@@ -49,5 +52,7 @@ COMPILE="gcc -Wall"
 [ $debug = no ] && COMPILE="$COMPILE -O3"
 
 msg "using '$COMPILE'"
-sed -e "s#@COMPILE@#$COMPILE#" makefile.in > makefile
+sed -e "s#@COMPILE@#$COMPILE#" \
+    -e "s#@TARGETS@#$TARGETS#" \
+    makefile.in > makefile
 msg "generated 'makefile' (run 'make')"

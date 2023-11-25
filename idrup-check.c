@@ -8,7 +8,9 @@ static const char * idrup_check_usage =
 "  -h | --help     print command line option summary\n"
 "  -q | --quiet    do not print any message beside errors\n"
 "  -v | --verbose  print more verbose message too\n"
+#ifndef NDEBUG
 "  -l | --logging  enable very verbose logging\n"
+#endif
 "\n"
 "Exactly two files are read, where '<icnf>' is an incremental CNF file\n"
 "augmented with all interactions between the user and the SAT solver.\n"
@@ -395,14 +397,10 @@ static void parse_and_check () {
       COPY (int, iline, line);
       goto PROOF_QUERY;
     case 0:
-      goto INTERACTION_COMPLETED;
+      return;
     default:
       unexpected_line (type, "'i' Or 'q'");
     }
-  }
-  {
-  INTERACTION_COMPLETED:
-    return;
   }
   {
   PROOF_INPUT:
@@ -440,7 +438,7 @@ static void parse_and_check () {
         goto QUERY_LINE_DOES_NOT_MATCH;
       else
         p++, q++;
-    PROOF_STATUS:
+  PROOF_STATUS:
     type = next_line ('l');
     if (type == 'l') {
       // PROOF_LEMMA:
@@ -451,18 +449,40 @@ static void parse_and_check () {
     } else if (type == 'w') {
       // PROOF_WEAKEN:
       goto PROOF_STATUS;
-    } else if (type == 's') {
-      // INTERACTION_STATUS:
-      const char *proof_status = status;
-      set_file (interactions);
-      type = next_line (0);
-      if (type != 's')
-        unexpected_line (type, "'s'");
-      if (status != proof_status)
-        type_error ("unexpected '%s' status (expected '%s')", status,
-                    proof_status);
-    } else
+    } else if (type != 's')
       unexpected_line (type, "'s'");
+    else if (status == SATISFIABLE)
+      goto INTERACTION_SATISFIABLE;
+    else
+      goto INTERACTION_UNSATISFIABLE;
+  }
+  {
+  INTERACTION_SATISFIABLE:
+    set_file (interactions);
+    type = next_line (0);
+    if (type != 's')
+      unexpected_line (type, "'s'");
+    if (status != SATISFIABLE)
+      type_error ("unexpected 's %s' line (expected 's SATISFIABLE')",
+                  status);
+    goto PROOF_SATISFIABLE;
+  }
+  {
+  INTERACTION_UNSATISFIABLE:
+    set_file (interactions);
+    type = next_line (0);
+    if (type != 's')
+      unexpected_line (type, "'s'");
+    if (status != UNSATISFIABLE)
+      type_error ("unexpected 's %s' line (expected 's UNSATISFIABLE')",
+                  status);
+    goto PROOF_UNSATISFIABLE;
+  }
+  {
+    PROOF_SATISFIABLE:
+  }
+  {
+    PROOF_UNSATISFIABLE:
   }
 }
 
@@ -483,7 +503,11 @@ int main (int argc, char **argv) {
     else if (!strcmp (arg, "-v") || !strcmp (arg, "--verbose"))
       verbosity += (verbosity < INT_MAX);
     else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging"))
+#ifndef NDEBUG
       verbosity = INT_MAX;
+#else
+      die ("invalid line option '%s' (compiled without debugging)", arg);
+#endif
     else if (arg[0] == '-')
       die ("invalid command line option '%s' (try '-h')", arg);
     else if (!files[0].name)

@@ -1,0 +1,21 @@
+digraph "idrup-check" {
+
+  start [shape=diamond];
+  start -> INTERACTION_INPUT;
+
+  INTERACTION_INPUT [shape=box];
+  INTERACTION_INPUT -> PROOF_INPUT [label=" i "];
+  INTERACTION_INPUT -> PROOF_QUERY [label=" q "];
+  INTERACTION_INPUT -> end [label=" EOF "];
+
+  PROOF_INPUT -> INTERACTION_INPUT [label=" i "];
+
+  PROOF_QUERY -> PROOF_CHECK [label=" q "];
+  PROOF_CHECK -> PROOF_CHECK [label=" l | d | w "];
+  PROOF_CHECK -> INTERACTION_STATUS [label=" s "];
+
+  INTERACTION_STATUS [shape=box];
+  INTERACTION_STATUS -> INTERACTION_INPUT [label=" s "];
+
+  end [shape=diamond];
+}

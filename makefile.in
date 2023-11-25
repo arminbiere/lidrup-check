@@ -1,10 +1,15 @@
 COMPILE=@COMPILE@
-all: 
+all: @TARGETS@
+idrup-check: idrup-check.c makefile
 	$(COMPILE) -o idrup-check idrup-check.c
+idrup-check.pdf: idrup-check.dot makefile
+	dot -Tpdf idrup-check.dot -o idrup-check.pdf
 clean:
-	rm -f makefile idrup-check test/*.log test/*.err
+	rm -f makefile idrup-check
+	rm -f test/*.log test/*.err
+	rm -f idrup-check.pdf
 format:
 	clang-format -i idrup-check.c
 test: all
 	./test/run.sh
-.PHONY: all clean format test
+.PHONY: all clean format pdf test

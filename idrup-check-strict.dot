@@ -45,15 +45,15 @@ digraph "idrup-check" {
   PROOF_VALUES -> INTERACTION_INPUT [label=" v"];
   PROOF_JUSTIFY -> INTERACTION_INPUT [label=" j "];
 
-  PROOF_INPUT_OR_VALUES -> INTERACTION_INPUT [label=" i ",color=red,fontcolor=red];
-  PROOF_INPUT_OR_VALUES -> PROOF_INPUT [label=" v ", color=blue,fontcolor=blue];
+  PROOF_INPUT_OR_VALUES -> INTERACTION_INPUT [label=" i ",color=invis,fontcolor=invis];
+  PROOF_INPUT_OR_VALUES -> PROOF_INPUT [label=" v ", color=black,fontcolor=black];
 
-  PROOF_QUERY_OR_VALUES -> PROOF_QUERY [label=" v ",color=blue,fontcolor=blue];
-  PROOF_QUERY_OR_VALUES -> PROOF_CHECK [label=" q ",color=red,fontcolor=red];
+  PROOF_QUERY_OR_VALUES -> PROOF_QUERY [label=" v ",color=black,fontcolor=black];
+  PROOF_QUERY_OR_VALUES -> PROOF_CHECK [label=" q ",color=invis,fontcolor=invis];
 
-  PROOF_QUERY_OR_JUSTIFY -> PROOF_QUERY [label=" j ",color=blue,fontcolor=blue];
-  PROOF_QUERY_OR_JUSTIFY -> PROOF_CHECK [label=" q ",color=red,fontcolor=red];
+  PROOF_QUERY_OR_JUSTIFY -> PROOF_QUERY [label=" j ",color=black,fontcolor=black];
+  PROOF_QUERY_OR_JUSTIFY -> PROOF_CHECK [label=" q ",color=invis,fontcolor=invis];
 
-  PROOF_INPUT_OR_JUSTIFY -> PROOF_INPUT [label=" j ",color=blue,fontcolor=blue];
-  PROOF_INPUT_OR_JUSTIFY -> INTERACTION_INPUT [label=" i ",color=red,fontcolor=red];
+  PROOF_INPUT_OR_JUSTIFY -> PROOF_INPUT [label=" j ",color=black,fontcolor=black];
+  PROOF_INPUT_OR_JUSTIFY -> INTERACTION_INPUT [label=" i ",color=invis,fontcolor=invis];
 }

@@ -10,6 +10,7 @@ where '<option>' is one of the following
 -g | --debug    compile with full debugging support
 -s | --symbols  include symbol table (default for '-g')
 -c | --check    assertion checking (default for '-g')
+-p | --pdfs     produce PDFs
 EOF
 exit 0
 }
@@ -36,7 +37,7 @@ do
     -g | --debug) debug=yes;;
     -s | --symbols) symbols=yes;;
     -c | --check) check=yes;;
-    -p | --pdf) TARGETS="$TARGETS idrup-check.pdf";;
+    -p | --pdf*) TARGETS="$TARGETS pdfs";;
     *) die "invalid option '$1' (try '-h')";;
   esac
   shift

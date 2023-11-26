@@ -1,13 +1,16 @@
 COMPILE=@COMPILE@
 all: @TARGETS@
+pdfs: idrup-check.pdf idrup-check-strict.pdf
 idrup-check: idrup-check.c makefile
 	$(COMPILE) -o idrup-check idrup-check.c
 idrup-check.pdf: idrup-check.dot makefile
 	dot -Tpdf idrup-check.dot -o idrup-check.pdf
+idrup-check-strict.pdf: idrup-check-strict.dot makefile
+	dot -Tpdf idrup-check-strict.dot -o idrup-check-strict.pdf
 clean:
 	rm -f makefile idrup-check
+	rm -f idrup-check.pdf idrup-check-strict.pdf
 	rm -f test/*.log test/*.err
-	rm -f idrup-check.pdf
 format:
 	clang-format -i idrup-check.c
 test: all

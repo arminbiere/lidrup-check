@@ -12,7 +12,7 @@ digraph "idrup-check" {
 
   INTERACTION_HEADER [shape=box];
   INTERACTION_HEADER -> PROOF_INPUT [label=" i ",style=invis];
-  INTERACTION_HEADER -> PROOF_QUERY [label=" q ",style=invis];
+  INTERACTION_HEADER -> PROOF_QUERY [label=" q ",color=invis,fontsize=20,fontcolor=invis];
   INTERACTION_HEADER -> INTERACTION_INPUT [label=" p ",weight=2];
 
   INTERACTION_INPUT [shape=box];

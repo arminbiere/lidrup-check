@@ -1,7 +1,7 @@
 digraph "idrup-check" {
 
   "start-of-file" [shape=diamond,color=darkgray,fontcolor=darkgray];
-  "start-of-file" -> INTERACTION_HEADER [weight=2,color=darkgray];
+  "start-of-file" -> INTERACTION_HEADER [label=" ^ ",weight=2,color=darkgray,fontcolor=darkgray];
 
   "end-of-file" [shape=diamond,color=darkgray,fontcolor=darkgray];
 
@@ -38,11 +38,16 @@ digraph "idrup-check" {
   INTERACTION_SATISFIED -> PROOF_VALUES [label=" v "];
   INTERACTION_SATISFIED -> PROOF_INPUT_OR_VALUES [label=" i "];
   INTERACTION_SATISFIED -> PROOF_QUERY_OR_VALUES [label=" q ", color=orange3,fontsize=20,fontcolor=orange3];
+  INTERACTION_SATISFIED -> PROOF_VALUES_AND_END [label=" $ "];
 
   INTERACTION_UNSATISFIED [shape=box,label="INTERACTION_UNSATISFIED!"];
   INTERACTION_UNSATISFIED -> PROOF_JUSTIFY [label=" j "];
   INTERACTION_UNSATISFIED -> PROOF_INPUT_OR_JUSTIFY [label=" i "];
   INTERACTION_UNSATISFIED -> PROOF_QUERY_OR_JUSTIFY [label=" q ",color=orange3,fontsize=20,fontcolor=orange3];
+  INTERACTION_UNSATISFIED -> PROOF_JUSTIFY_AND_END [label=" $ "];
+
+  PROOF_VALUES_AND_END -> "end-of-file" [label=" v ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_JUSTIFY_AND_END -> "end-of-file" [label=" j ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
 
   PROOF_VALUES -> INTERACTION_INPUT [label=" v ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
   PROOF_JUSTIFY -> INTERACTION_INPUT [label=" j ",color=darkgreen,fontsize=20,fontcolor=darkgreen];

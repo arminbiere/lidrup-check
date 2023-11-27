@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * idrup_check_usage =
-"usage: idrup-check [ <option> ... ] <icnf> <proof>\n"
+"usage: idrup-check [ <option> ... ] <icnf> <idrup>\n"
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
@@ -12,15 +12,24 @@ static const char * idrup_check_usage =
 "  -l | --logging  enable very verbose logging\n"
 #endif
 "\n"
-"  --strict    strict mode (requires 'v' and 'j' lines in proof only - default)\n"
+"Exactly two files are read. The first '<icnf>' is an incremental CNF file\n"
+"augmented with all interactions between the user and the SAT solver.\n"
+"Thus the letter 'i' is overloaded and means both 'incremental' and\n"
+"'interactions'. The second '<idrup>' file is meant to be a super-set of\n"
+"the interactions file but additionally has all the low level proof steps.\n"
+"\n"
+"The checker makes sure the interactions match the proof and all proof\n"
+"steps are justified. This is only the case though for the 'pedantic'\n"
+"and the default 'strict' mode.  Checking is less strict in 'relaxed'\n"
+"mode where conclusion missing in the proof will be skipped.  Still the\n"
+"exit code will only be zero if all checks go through and thus the\n"
+"interactions are all checked.\n"
+"\n"
+"These modes can can be set explicitly as follows:\n"
+"\n"
+"  --strict    strict mode (requires 'v' and 'j' lines in proof only)\n"
 "  --relaxed   relaxed mode (missing 'v' and 'j' proof lines ignored)\n"
 "  --pedantic  pedantic mode (requires 'v' and 'j' in both files\n"
-"\n"
-"Exactly two files are read, where '<icnf>' is an incremental CNF file\n"
-"augmented with all interactions between the user and the SAT solver.\n"
-"The '<proof>' file is meant to be a super-set of the interactions\n"
-"but additionally has all the low level proof steps.  The checker makes\n"
-"sure the interactions match the proof and all proof steps are justified.\n"
 ;
 
 // clang-format on
@@ -174,9 +183,14 @@ static struct ints iline;
 static struct ints pline;
 
 static struct ints line;
-static const char *SATISFIABLE = "SATISFIABLE";
-static const char *UNSATISFIABLE = "UNSATISFIABLE";
+
+static const char * const SATISFIABLE = "SATISFIABLE";
+static const char * const UNSATISFIABLE = "UNSATISFIABLE";
 static const char *status;
+
+static const char * const ICNF = "ICNF";
+// static const char * const CNF = "CNF"; // TODO
+static const char * cnf_file_type;
 
 static inline void set_file (struct file *new_file) {
   assert (new_file);
@@ -306,10 +320,22 @@ RESTART:
 #endif
     return 0;
   }
-  if (ch == '\n')
+  if (ch == '\n') {
+    message ("skipping empty line %zu in '%s'", file->start_of_line + 1,
+             file->name);
     goto RESTART;
+  }
 
-  // TODO add support for 'p cnf <vars> <clauses>' and 'p icnf' headers.
+  if (ch == 'p') {
+    for (const char * p = " icnf"; *p; p++)
+      if (next_char () != *p)
+	parse_error ("invalid 'p' header line");
+    if (next_char () != '\n')
+      parse_error ("expected new line after 'p icnf' header");
+    cnf_file_type = ICNF;
+    // TODO parse 'p cnf <vars> <clauses>' header too.
+    return 'p';
+  }
 
   if ('a' <= ch && ch <= 'z') {
     actual_type = ch;
@@ -320,7 +346,7 @@ RESTART:
     if (isprint (ch))
       parse_error ("unexpected character '%c'", ch);
     else
-      parse_error ("unexpected character coder %02x", (int) ch);
+      parse_error ("unexpected character code %02x", (int) ch);
   } else
     actual_type = default_type;
   if (actual_type == 's') {

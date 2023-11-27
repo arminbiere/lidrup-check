@@ -19,8 +19,8 @@ static const char * idrup_check_usage =
 "the interactions file but additionally has all the low level proof steps.\n"
 "\n"
 "The checker makes sure the interactions match the proof and all proof\n"
-"steps are justified. This is only the case though for the 'pedantic'\n"
-"and the default 'strict' mode.  Checking is less strict in 'relaxed'\n"
+"steps are justified. This is only the case though for the default\n"
+"'pedantic' and the 'strict' mode.  Checking is less strict in 'relaxed'\n"
 "mode where conclusion missing in the proof will be skipped.  Still the\n"
 "exit code will only be zero if all checks go through and thus the\n"
 "interactions are all checked.\n"
@@ -75,7 +75,7 @@ enum {
   pedantic = 1,
 };
 
-static int mode = strict;
+static int mode = pedantic;
 
 static void message (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
@@ -184,13 +184,13 @@ static struct ints pline;
 
 static struct ints line;
 
-static const char * const SATISFIABLE = "SATISFIABLE";
-static const char * const UNSATISFIABLE = "UNSATISFIABLE";
+static const char *const SATISFIABLE = "SATISFIABLE";
+static const char *const UNSATISFIABLE = "UNSATISFIABLE";
 static const char *status;
 
-static const char * const ICNF = "ICNF";
+static const char *const ICNF = "ICNF";
 // static const char * const CNF = "CNF"; // TODO
-static const char * cnf_file_type;
+static const char *cnf_file_type;
 
 static inline void set_file (struct file *new_file) {
   assert (new_file);
@@ -327,9 +327,9 @@ RESTART:
   }
 
   if (ch == 'p') {
-    for (const char * p = " icnf"; *p; p++)
+    for (const char *p = " icnf"; *p; p++)
       if (next_char () != *p)
-	parse_error ("invalid 'p' header line");
+        parse_error ("invalid 'p' header line");
     if (next_char () != '\n')
       parse_error ("expected new line after 'p icnf' header");
     cnf_file_type = ICNF;
@@ -420,8 +420,24 @@ static void unexpected_line (int type, const char *expected) {
     type_error ("unexpected end-of-file (expected %s line)", expected);
 }
 
-static int parse_and_check () {
-  int res = 0;
+static void check_implied_and_add_lemma () {}
+
+static void find_active_and_delete () {}
+
+static void find_active_and_weaken () {}
+
+static void find_inactive_and_restore () {}
+
+static int parse_and_check_in_pedantic_mode () {
+  verbose ("starting interactions and proof checking in strict mode");
+  {
+    // INTERACTION_HEADER:
+    set_file (interactions);
+    int type = next_line (0);
+    if (type != 'p')
+      unexpected_line (type, "'p'");
+    goto INTERACTION_INPUT;
+  }
   {
   INTERACTION_INPUT:
     set_file (interactions);
@@ -434,29 +450,37 @@ static int parse_and_check () {
       COPY (int, iline, line);
       goto PROOF_QUERY;
     case 0:
-      return res;
+      verbose ("finished interactions and proof checking in strict mode");
+      return 0;
     default:
-      unexpected_line (type, "'i' Or 'q'");
+      unexpected_line (type, "'i' or 'q'");
     }
   }
   {
   PROOF_INPUT:
     set_file (proof);
     int type = next_line ('i');
-    if (type != 'i')
-      unexpected_line (type, "'i'");
-    if (SIZE (line) != SIZE (iline))
-    INPUT_LINE_DOES_NOT_MATCH:
-      type_error ("input line does not match");
-    const int *const end = iline.end;
-    const int *p = iline.begin;
-    const int *q = line.begin;
-    while (p != end)
-      if (*p != *q)
-        goto INPUT_LINE_DOES_NOT_MATCH;
-      else
-        p++, q++;
-    goto INTERACTION_INPUT;
+    if (type == 'i') {
+      if (SIZE (line) != SIZE (iline))
+      INPUT_LINE_DOES_NOT_MATCH:
+        type_error ("input line does not match");
+      const int *const end = iline.end;
+      const int *p = iline.begin;
+      const int *q = line.begin;
+      while (p != end)
+        if (*p != *q)
+          goto INPUT_LINE_DOES_NOT_MATCH;
+        else
+          p++, q++;
+      goto INTERACTION_INPUT;
+    } else if (type == 'l')
+      check_implied_and_add_lemma ();
+    else if (type == 'd')
+      find_active_and_delete ();
+    else if (type == 'r')
+      find_inactive_and_restore ();
+    else
+      unexpected_line (type, "'i', 'l', 'd', or 'r'");
   }
   {
   PROOF_QUERY:
@@ -475,20 +499,24 @@ static int parse_and_check () {
         goto QUERY_LINE_DOES_NOT_MATCH;
       else
         p++, q++;
-    goto PROOF_STATUS;
+    goto PROOF_CHECK;
   }
   {
-  PROOF_STATUS:
+  PROOF_CHECK:
+    set_file (proof);
     int type = next_line ('l');
     if (type == 'l') {
-      // PROOF_LEMMA:
-      goto PROOF_STATUS;
+      check_implied_and_add_lemma ();
+      goto PROOF_CHECK;
     } else if (type == 'd') {
-      // PROOF_DELETE:
-      goto PROOF_STATUS;
+      find_active_and_delete ();
+      goto PROOF_CHECK;
+    } else if (type == 'r') {
+      find_inactive_and_restore ();
+      goto PROOF_CHECK;
     } else if (type == 'w') {
-      // PROOF_WEAKEN:
-      goto PROOF_STATUS;
+      find_active_and_weaken ();
+      goto PROOF_CHECK;
     } else if (type != 's')
       unexpected_line (type, "'s'");
     else if (status == SATISFIABLE)
@@ -505,7 +533,7 @@ static int parse_and_check () {
     if (status != SATISFIABLE)
       type_error ("unexpected 's %s' line (expected 's SATISFIABLE')",
                   status);
-    goto PROOF_SATISFIABLE;
+    goto INTERACTION_SATISFIED;
   }
   {
   INTERACTION_UNSATISFIABLE:
@@ -516,12 +544,50 @@ static int parse_and_check () {
     if (status != UNSATISFIABLE)
       type_error ("unexpected 's %s' line (expected 's UNSATISFIABLE')",
                   status);
-    goto PROOF_UNSATISFIABLE;
+    goto INTERACTION_UNSATISFIED;;
   }
-  {PROOF_SATISFIABLE : } {
-  PROOF_UNSATISFIABLE:
+  {
+    INTERACTION_SATISFIED:
+    set_file (interactions);
+    int type = next_line (0);
+    if (type != 'v')
+      unexpected_line (type, "'v'");
+    goto PROOF_VALUES;
   }
-  return res;
+  {
+    PROOF_VALUES:
+    set_file (proof);
+    int type = next_line (0);
+    if (type != 'v')
+      unexpected_line (type, "'v'");
+    goto INTERACTION_INPUT;
+  }
+  {
+    INTERACTION_UNSATISFIED:
+    set_file (interactions);
+    int type = next_line (0);
+    if (type != 'j')
+      unexpected_line (type, "'j'");
+    goto PROOF_JUSTIFY;
+  }
+  {
+    PROOF_JUSTIFY:
+      set_file (proof);
+      int type = next_line (0);
+      if (type != 'j')
+	unexpected_line (type, "'j'");
+      goto INTERACTION_INPUT;
+  }
+}
+
+static int parse_and_check_in_strict_mode () {
+  die ("strict checking mode not implemented yet");
+  return 1;
+}
+
+static int parse_and_check_in_relaxed_mode () {
+  die ("relaxed checking mode not implemented yet");
+  return 1;
 }
 
 static void release (void) {
@@ -579,7 +645,13 @@ int main (int argc, char **argv) {
   message ("reading and checking incremental DRUP proof '%s'",
            files[1].name);
 
-  int res = parse_and_check ();
+  int res;
+  if (mode == strict)
+    res = parse_and_check_in_strict_mode ();
+  else if (mode == pedantic)
+    res = parse_and_check_in_pedantic_mode ();
+  else
+    res = parse_and_check_in_relaxed_mode ();
 
   for (int i = 0; i != 2; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",

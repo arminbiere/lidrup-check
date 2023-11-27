@@ -449,7 +449,7 @@ static int allocated_variables;
 static struct watches *matrix;
 static signed char *values;
 static struct ints trail;
-static size_t propagated;
+// static size_t propagate;
 
 static void import_literal (int lit) {}
 
@@ -484,7 +484,7 @@ static void add_clause (bool input) {
   memcpy (c->lits, line.begin, lits_bytes);
 }
 
-static void save_query () {}
+static void save_query () { statistics.queries++; }
 
 static void check_implied () {}
 
@@ -509,30 +509,35 @@ static void superset_saved () {}
 static void import_add_input () {
   import_literals ();
   add_clause (true);
+  statistics.inputs++;
 }
 
 static void import_check_add_lemma () {
   import_literals ();
   check_implied ();
   add_clause (false);
+  statistics.lemmas++;
 }
 
 static void imported_find_delete_clause () {
   literals_imported ();
   struct clause *c = find_clause (true);
   delete_clause (c);
+  statistics.deleted++;
 }
 
 static void imported_find_restore_clause () {
   literals_imported ();
   struct clause *c = find_clause (false);
   restore_clause (c);
+  statistics.restored++;
 }
 
 static void imported_find_weaken_clause () {
   literals_imported ();
   struct clause *c = find_clause (true);
   weaken_clause (c);
+  statistics.weakened++;
 }
 
 static void match_saved (const char *type_str) {
@@ -718,6 +723,17 @@ static void release (void) {
   free (matrix);
 }
 
+static void print_statistics () {
+  printf ("c %-20s %20zu\n", "decisions:", statistics.decisions);
+  printf ("c %-20s %20zu\n", "deleted:", statistics.deleted);
+  printf ("c %-20s %20zu\n", "inputs:", statistics.inputs);
+  printf ("c %-20s %20zu\n", "lemmas:", statistics.lemmas);
+  printf ("c %-20s %20zu\n", "propagations:", statistics.propagations);
+  printf ("c %-20s %20zu\n", "queries:", statistics.queries);
+  printf ("c %-20s %20zu\n", "restored:", statistics.restored);
+  printf ("c %-20s %20zu\n", "weakened:", statistics.weakened);
+}
+
 int main (int argc, char **argv) {
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
@@ -781,5 +797,10 @@ int main (int argc, char **argv) {
     fclose (files[i].file);
   }
   release ();
+  if (verbosity >= 0) {
+    print_statistics ();
+    printf ("c exit %d\n", res);
+    fflush (stdout);
+  }
   return res;
 }

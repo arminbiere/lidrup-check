@@ -1,6 +1,6 @@
 digraph "idrup-check" {
 
-  "start-of-file" [shape=diamond,color=darkgray,fontcolor=darkgray];
+  "start-of-file" [shape=box,color=darkgray,fontcolor=darkgray];
   "start-of-file" -> INTERACTION_HEADER [label=" ^ ",weight=2,color=darkgray,fontcolor=darkgray];
 
   "end-of-file" [shape=diamond,color=darkgray,fontcolor=darkgray];

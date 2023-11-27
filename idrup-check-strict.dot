@@ -1,6 +1,6 @@
 digraph "idrup-check" {
 
-  "start-of-file" [shape=diamond,color=darkgray,fontcolor=darkgray];
+  "start-of-file" [shape=box,color=darkgray,fontcolor=darkgray];
   "start-of-file" -> INTERACTION_HEADER [label=" ^ ",weight=2,color=darkgray,fontcolor=darkgray];
 
   "end-of-file" [shape=diamond,color=darkgray,fontcolor=darkgray];
@@ -8,7 +8,7 @@ digraph "idrup-check" {
   // INTERACTION_HEADER -> "end-of-file";
   // INTERACTION_INPUT -> "end-of-file";
    "end-of-file" -> INTERACTION_HEADER [label="$    ",dir=back,color=darkgray,style=invis];
-   "end-of-file" -> INTERACTION_INPUT [label="$    ",dir=back,color=darkgray];
+   "end-of-file" -> INTERACTION_INPUT [label="$    ",dir=back,color=darkgray,fontcolor=darkgray];
 
   INTERACTION_HEADER [shape=box];
   INTERACTION_HEADER -> PROOF_INPUT [label=" i ",style=invis];

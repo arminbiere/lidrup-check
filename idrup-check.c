@@ -38,6 +38,7 @@ static const char * idrup_check_usage =
 #include <ctype.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -418,32 +419,132 @@ static void unexpected_line (int type, const char *expected) {
     type_error ("unexpected end-of-file (expected %s line)", expected);
 }
 
-static void add_input_clause () {}
+static struct {
+  size_t decisions;
+  size_t deleted;
+  size_t inputs;
+  size_t lemmas;
+  size_t propagations;
+  size_t queries;
+  size_t restored;
+  size_t weakened;
+} statistics;
+
+struct clause {
+#ifndef NDEBUG
+  size_t lineno;
+#endif
+  unsigned size;
+  bool active;
+  bool input;
+  int lits[];
+};
+
+struct watches {
+  struct clause **begin, **end, **allocated;
+};
+
+static int max_var;
+static int allocated_variables;
+static struct watches *matrix;
+static signed char *values;
+static struct ints trail;
+static size_t propagated;
+
+static void import_literal (int lit) {}
+
+static void import_literals () {
+  for (all_elements (int, lit, line))
+    import_literal (lit);
+}
+
+static void literal_imported (int lit) {}
+
+static void literals_imported () {
+  for (all_elements (int, lit, line))
+    literal_imported (lit);
+}
+
+static void add_clause (bool input) {
+  size_t size = SIZE (line);
+  if (size > UINT_MAX)
+    parse_error ("maximum clause size exhausted");
+  size_t lits_bytes = size * sizeof (int);
+  size_t all_bytes = sizeof (struct clause) + lits_bytes;
+  struct clause *c = malloc (all_bytes);
+  if (!c)
+    out_of_memory ("allocating clause of size %zu", size);
+  assert (file);
+#ifndef NDEBUG
+  c->lineno = file->start_of_line + 1;
+#endif
+  c->size = size;
+  c->active = true;
+  c->input = input;
+  memcpy (c->lits, line.begin, lits_bytes);
+}
 
 static void save_query () {}
 
-static void check_implied_and_add_lemma () {}
+static void check_implied () {}
 
-static void find_active_and_delete () {}
+static struct clause *find_clause (bool active) { return 0; }
 
-static void find_active_and_weaken () {}
+static void delete_clause (struct clause *) {}
 
-static void find_inactive_and_restore () {}
+static void weaken_clause (struct clause *) {}
 
-static void check_values_of_model () {}
+static void restore_clause (struct clause *c) {}
+
+static void check_model () {}
 
 static void justify_core () {}
 
+static void consistent_line () {}
+
+static void subset_saved () {}
+
+static void superset_saved () {}
+
+static void import_add_input () {
+  import_literals ();
+  add_clause (true);
+}
+
+static void import_check_add_lemma () {
+  import_literals ();
+  check_implied ();
+  add_clause (false);
+}
+
+static void imported_find_delete_clause () {
+  literals_imported ();
+  struct clause *c = find_clause (true);
+  delete_clause (c);
+}
+
+static void imported_find_restore_clause () {
+  literals_imported ();
+  struct clause *c = find_clause (false);
+  restore_clause (c);
+}
+
+static void imported_find_weaken_clause () {
+  literals_imported ();
+  struct clause *c = find_clause (true);
+  weaken_clause (c);
+}
+
 static void match_saved (const char *type_str) {
   if (SIZE (line) != SIZE (saved))
-  INPUT_LINE_DOES_NOT_MATCH:
+  SAVED_LINE_DOES_NOT_MATCH:
     type_error ("%s line does not match", type_str);
   const int *const end = saved.end;
   const int *p = saved.begin;
   const int *q = line.begin;
   while (p != end)
     if (*p != *q)
-      goto INPUT_LINE_DOES_NOT_MATCH;
+      goto SAVED_LINE_DOES_NOT_MATCH;
     else
       p++, q++;
 }
@@ -466,7 +567,7 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line ('i');
     switch (type) {
     case 'i':
-      add_input_clause ();
+      import_add_input ();
       save_line ();
       goto PROOF_INPUT;
     case 'q':
@@ -487,14 +588,14 @@ static int parse_and_check_in_pedantic_mode () {
     if (type == 'i') {
       match_saved ("input");
       goto INTERACTION_INPUT;
-    } else if (type == 'l')
-      check_implied_and_add_lemma ();
-    else if (type == 'd')
-      find_active_and_delete ();
-    else if (type == 'r')
-      find_inactive_and_restore ();
-    else
-      unexpected_line (type, "'i', 'l', 'd', or 'r'");
+    } else if (type == 'l') {
+      import_check_add_lemma ();
+      goto PROOF_INPUT;
+    } else if (type == 'd') {
+      imported_find_delete_clause ();
+      goto PROOF_INPUT;
+    } else
+      unexpected_line (type, "'i', 'l', or 'd'");
   }
   {
   PROOF_QUERY:
@@ -510,16 +611,16 @@ static int parse_and_check_in_pedantic_mode () {
     set_file (proof);
     int type = next_line ('l');
     if (type == 'l') {
-      check_implied_and_add_lemma ();
+      import_check_add_lemma ();
       goto PROOF_CHECK;
     } else if (type == 'd') {
-      find_active_and_delete ();
+      imported_find_delete_clause ();
       goto PROOF_CHECK;
     } else if (type == 'r') {
-      find_inactive_and_restore ();
+      imported_find_restore_clause ();
       goto PROOF_CHECK;
     } else if (type == 'w') {
-      find_active_and_weaken ();
+      imported_find_weaken_clause ();
       goto PROOF_CHECK;
     } else if (type != 's')
       unexpected_line (type, "'s'");
@@ -557,6 +658,8 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line (0);
     if (type != 'v')
       unexpected_line (type, "'v'");
+    consistent_line ();
+    save_line ();
     goto PROOF_VALUES;
   }
   {
@@ -565,7 +668,9 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line (0);
     if (type != 'v')
       unexpected_line (type, "'v'");
-    check_values_of_model ();
+    consistent_line ();
+    superset_saved ();
+    check_model ();
     goto INTERACTION_INPUT;
   }
   {
@@ -574,6 +679,8 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line (0);
     if (type != 'j')
       unexpected_line (type, "'j'");
+    consistent_line ();
+    save_line ();
     goto PROOF_JUSTIFY;
   }
   {
@@ -582,6 +689,8 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line (0);
     if (type != 'j')
       unexpected_line (type, "'j'");
+    consistent_line ();
+    subset_saved ();
     justify_core ();
     goto INTERACTION_INPUT;
   }
@@ -600,6 +709,13 @@ static int parse_and_check_in_relaxed_mode () {
 static void release (void) {
   RELEASE (line);
   RELEASE (saved);
+  RELEASE (trail);
+  values += allocated_variables;
+  free (values);
+  for (int lit = -max_var; lit != max_var; lit++)
+    free (matrix[lit].begin);
+  matrix += allocated_variables;
+  free (matrix);
 }
 
 int main (int argc, char **argv) {

@@ -12,6 +12,10 @@ static const char * idrup_check_usage =
 "  -l | --logging  enable very verbose logging\n"
 #endif
 "\n"
+"  --strict    strict mode (requires 'v' and 'j' lines in proof only - default)\n"
+"  --relaxed   relaxed mode (missing 'v' and 'j' proof lines ignored)\n"
+"  --pedantic  pedantic mode (requires 'v' and 'j' in both files\n"
+"\n"
 "Exactly two files are read, where '<icnf>' is an incremental CNF file\n"
 "augmented with all interactions between the user and the SAT solver.\n"
 "The '<proof>' file is meant to be a super-set of the interactions\n"
@@ -54,8 +58,15 @@ static void out_of_memory (const char *fmt, ...) {
   exit (1);
 }
 
-// static int merge = 1;
 static int verbosity = 0;
+
+enum {
+  strict = 0,
+  relaxed = -1,
+  pedantic = 1,
+};
+
+static int mode = strict;
 
 static void message (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
@@ -383,12 +394,12 @@ static void unexpected_line (int type, const char *expected) {
     type_error ("unexpected end-of-file (expected %s line)", expected);
 }
 
-static void parse_and_check () {
-  int type;
+static int parse_and_check () {
+  int res = 0;
   {
   INTERACTION_INPUT:
     set_file (interactions);
-    type = next_line ('i');
+    int type = next_line ('i');
     switch (type) {
     case 'i':
       COPY (int, iline, line);
@@ -397,7 +408,7 @@ static void parse_and_check () {
       COPY (int, iline, line);
       goto PROOF_QUERY;
     case 0:
-      return;
+      return res;
     default:
       unexpected_line (type, "'i' Or 'q'");
     }
@@ -405,7 +416,7 @@ static void parse_and_check () {
   {
   PROOF_INPUT:
     set_file (proof);
-    type = next_line ('i');
+    int type = next_line ('i');
     if (type != 'i')
       unexpected_line (type, "'i'");
     if (SIZE (line) != SIZE (iline))
@@ -424,7 +435,7 @@ static void parse_and_check () {
   {
   PROOF_QUERY:
     set_file (proof);
-    type = next_line (0);
+    int type = next_line (0);
     if (type != 'q')
       unexpected_line (type, "'q'");
     if (SIZE (line) != SIZE (iline))
@@ -438,8 +449,11 @@ static void parse_and_check () {
         goto QUERY_LINE_DOES_NOT_MATCH;
       else
         p++, q++;
+    goto PROOF_STATUS;
+  }
+  {
   PROOF_STATUS:
-    type = next_line ('l');
+    int type = next_line ('l');
     if (type == 'l') {
       // PROOF_LEMMA:
       goto PROOF_STATUS;
@@ -459,7 +473,7 @@ static void parse_and_check () {
   {
   INTERACTION_SATISFIABLE:
     set_file (interactions);
-    type = next_line (0);
+    int type = next_line (0);
     if (type != 's')
       unexpected_line (type, "'s'");
     if (status != SATISFIABLE)
@@ -470,7 +484,7 @@ static void parse_and_check () {
   {
   INTERACTION_UNSATISFIABLE:
     set_file (interactions);
-    type = next_line (0);
+    int type = next_line (0);
     if (type != 's')
       unexpected_line (type, "'s'");
     if (status != UNSATISFIABLE)
@@ -478,12 +492,10 @@ static void parse_and_check () {
                   status);
     goto PROOF_UNSATISFIABLE;
   }
-  {
-    PROOF_SATISFIABLE:
+  {PROOF_SATISFIABLE : } {
+  PROOF_UNSATISFIABLE:
   }
-  {
-    PROOF_UNSATISFIABLE:
-  }
+  return res;
 }
 
 static void release (void) {
@@ -508,6 +520,12 @@ int main (int argc, char **argv) {
 #else
       die ("invalid line option '%s' (compiled without debugging)", arg);
 #endif
+    else if (!strcmp (arg, "--strict"))
+      mode = strict;
+    else if (!strcmp (arg, "--relaxed"))
+      mode = relaxed;
+    else if (!strcmp (arg, "--pedantic"))
+      mode = pedantic;
     else if (arg[0] == '-')
       die ("invalid command line option '%s' (try '-h')", arg);
     else if (!files[0].name)
@@ -535,7 +553,7 @@ int main (int argc, char **argv) {
   message ("reading and checking incremental DRUP proof '%s'",
            files[1].name);
 
-  parse_and_check ();
+  int res = parse_and_check ();
 
   for (int i = 0; i != 2; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",
@@ -543,5 +561,5 @@ int main (int argc, char **argv) {
     fclose (files[i].file);
   }
   release ();
-  return 0;
+  return res;
 }

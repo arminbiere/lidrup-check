@@ -448,9 +448,7 @@ static void match_saved (const char *type_str) {
       p++, q++;
 }
 
-static void save_line () {
-  COPY (int, saved, line);
-}
+static void save_line () { COPY (int, saved, line); }
 
 static int parse_and_check_in_pedantic_mode () {
   verbose ("starting interactions and proof checking in strict mode");

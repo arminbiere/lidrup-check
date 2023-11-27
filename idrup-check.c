@@ -798,8 +798,9 @@ int main (int argc, char **argv) {
   }
   release ();
   if (verbosity >= 0) {
+    printf ("c\n");
     print_statistics ();
-    printf ("c exit %d\n", res);
+    printf ("c\nc exit %d\n", res);
     fflush (stdout);
   }
   return res;

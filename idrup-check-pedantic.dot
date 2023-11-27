@@ -7,8 +7,8 @@ digraph "idrup-check" {
 
   // INTERACTION_HEADER -> "end-of-file";
   // INTERACTION_INPUT -> "end-of-file";
-   "end-of-file" -> INTERACTION_HEADER [dir=back,color=darkgray,style=invis];
-   "end-of-file" -> INTERACTION_INPUT [dir=back,color=darkgray];
+   "end-of-file" -> INTERACTION_HEADER [label="$    ",dir=back,color=darkgray,style=invis];
+   "end-of-file" -> INTERACTION_INPUT [label="$    ",dir=back,color=darkgray];
 
   INTERACTION_HEADER [shape=box];
   INTERACTION_HEADER -> PROOF_INPUT [label=" i ",style=invis];

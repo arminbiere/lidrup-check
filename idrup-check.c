@@ -179,9 +179,7 @@ static struct file *interactions = files + 0;
 static struct file *proof = files + 1;
 static struct file *file;
 
-static struct ints iline;
-static struct ints pline;
-
+static struct ints saved;
 static struct ints line;
 
 static const char *const SATISFIABLE = "SATISFIABLE";
@@ -420,6 +418,10 @@ static void unexpected_line (int type, const char *expected) {
     type_error ("unexpected end-of-file (expected %s line)", expected);
 }
 
+static void add_input_clause () {}
+
+static void save_query () {}
+
 static void check_implied_and_add_lemma () {}
 
 static void find_active_and_delete () {}
@@ -427,6 +429,28 @@ static void find_active_and_delete () {}
 static void find_active_and_weaken () {}
 
 static void find_inactive_and_restore () {}
+
+static void check_values_of_model () {}
+
+static void justify_core () {}
+
+static void match_saved (const char *type_str) {
+  if (SIZE (line) != SIZE (saved))
+  INPUT_LINE_DOES_NOT_MATCH:
+    type_error ("%s line does not match", type_str);
+  const int *const end = saved.end;
+  const int *p = saved.begin;
+  const int *q = line.begin;
+  while (p != end)
+    if (*p != *q)
+      goto INPUT_LINE_DOES_NOT_MATCH;
+    else
+      p++, q++;
+}
+
+static void save_line () {
+  COPY (int, saved, line);
+}
 
 static int parse_and_check_in_pedantic_mode () {
   verbose ("starting interactions and proof checking in strict mode");
@@ -444,10 +468,12 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line ('i');
     switch (type) {
     case 'i':
-      COPY (int, iline, line);
+      add_input_clause ();
+      save_line ();
       goto PROOF_INPUT;
     case 'q':
-      COPY (int, iline, line);
+      save_query ();
+      save_line ();
       goto PROOF_QUERY;
     case 0:
       verbose ("finished interactions and proof checking in strict mode");
@@ -461,17 +487,7 @@ static int parse_and_check_in_pedantic_mode () {
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i') {
-      if (SIZE (line) != SIZE (iline))
-      INPUT_LINE_DOES_NOT_MATCH:
-        type_error ("input line does not match");
-      const int *const end = iline.end;
-      const int *p = iline.begin;
-      const int *q = line.begin;
-      while (p != end)
-        if (*p != *q)
-          goto INPUT_LINE_DOES_NOT_MATCH;
-        else
-          p++, q++;
+      match_saved ("input");
       goto INTERACTION_INPUT;
     } else if (type == 'l')
       check_implied_and_add_lemma ();
@@ -488,17 +504,7 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line (0);
     if (type != 'q')
       unexpected_line (type, "'q'");
-    if (SIZE (line) != SIZE (iline))
-    QUERY_LINE_DOES_NOT_MATCH:
-      type_error ("query line does not match");
-    const int *const end = iline.end;
-    const int *p = iline.begin;
-    const int *q = line.begin;
-    while (p != end)
-      if (*p != *q)
-        goto QUERY_LINE_DOES_NOT_MATCH;
-      else
-        p++, q++;
+    match_saved ("query");
     goto PROOF_CHECK;
   }
   {
@@ -544,10 +550,11 @@ static int parse_and_check_in_pedantic_mode () {
     if (status != UNSATISFIABLE)
       type_error ("unexpected 's %s' line (expected 's UNSATISFIABLE')",
                   status);
-    goto INTERACTION_UNSATISFIED;;
+    goto INTERACTION_UNSATISFIED;
+    ;
   }
   {
-    INTERACTION_SATISFIED:
+  INTERACTION_SATISFIED:
     set_file (interactions);
     int type = next_line (0);
     if (type != 'v')
@@ -555,15 +562,16 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_VALUES;
   }
   {
-    PROOF_VALUES:
+  PROOF_VALUES:
     set_file (proof);
     int type = next_line (0);
     if (type != 'v')
       unexpected_line (type, "'v'");
+    check_values_of_model ();
     goto INTERACTION_INPUT;
   }
   {
-    INTERACTION_UNSATISFIED:
+  INTERACTION_UNSATISFIED:
     set_file (interactions);
     int type = next_line (0);
     if (type != 'j')
@@ -571,12 +579,13 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_JUSTIFY;
   }
   {
-    PROOF_JUSTIFY:
-      set_file (proof);
-      int type = next_line (0);
-      if (type != 'j')
-	unexpected_line (type, "'j'");
-      goto INTERACTION_INPUT;
+  PROOF_JUSTIFY:
+    set_file (proof);
+    int type = next_line (0);
+    if (type != 'j')
+      unexpected_line (type, "'j'");
+    justify_core ();
+    goto INTERACTION_INPUT;
   }
 }
 
@@ -592,8 +601,7 @@ static int parse_and_check_in_relaxed_mode () {
 
 static void release (void) {
   RELEASE (line);
-  RELEASE (iline);
-  RELEASE (pline);
+  RELEASE (saved);
 }
 
 int main (int argc, char **argv) {

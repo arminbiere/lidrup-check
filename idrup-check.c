@@ -775,7 +775,7 @@ int main (int argc, char **argv) {
   if (!(files[1].file = fopen (files[1].name, "r")))
     die ("can not read incremental DRUP proof file '%s'", files[1].name);
 
-  message ("Incremental DRUP Checker Version 0.0.0");
+  message ("Interaction DRUP Checker Version 0.0.0");
   message ("Copyright (c) 2023 University of Freiburg");
   if (verbosity >= 0)
     fputs ("c\n", stdout);

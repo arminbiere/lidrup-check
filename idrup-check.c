@@ -557,17 +557,13 @@ static void match_saved (const char *type_str) {
 static void save_line () { COPY (int, saved, line); }
 
 #ifndef NDEBUG
-
 #define STATE(NAME) \
   goto NAME; \
 NAME: \
   if (verbosity == INT_MAX) \
     fputs ("c " #NAME " \n", stdout);
-
 #else
-
 #define STATE(NAME) goto NAME;NAME:
-
 #endif
 
 static int parse_and_check_in_pedantic_mode () {

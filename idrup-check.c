@@ -432,11 +432,14 @@ static void unexpected_line (int type, const char *expected) {
 
 static struct {
   size_t added;
+  size_t conclusions;
   size_t decisions;
   size_t deleted;
   size_t inputs;
   size_t imported;
+  size_t justifications;
   size_t lemmas;
+  size_t models;
   size_t propagations;
   size_t queries;
   size_t restored;
@@ -523,9 +526,17 @@ static void restore_clause (struct clause *c) {
   debug ("restoring clause");
 }
 
-static void check_model () { debug ("checking model"); }
+static void check_model () { 
+  debug ("checking model");
+  statistics.conclusions++;
+  statistics.models++;
+}
 
-static void justify_core () { debug ("justifying core"); }
+static void justify_core () {
+  debug ("justifying core");
+  statistics.conclusions++;
+  statistics.justifications++;
+}
 
 static void consistent_line () { debug ("checking consistency"); }
 
@@ -809,6 +820,9 @@ static void print_statistics () {
   double t = process_time ();
   printf ("c %-20s %20zu %12.2f per variable\n", "added:", statistics.added,
           average (statistics.added, statistics.imported));
+  printf ("c %-20s %20zu %12.2f %% queries\n",
+          "conclusions:", statistics.conclusions,
+          percent (statistics.conclusions, statistics.queries));
   printf ("c %-20s %20zu %12.2f per lemma\n",
           "decisions:", statistics.decisions,
           average (statistics.decisions, statistics.lemmas));
@@ -816,8 +830,14 @@ static void print_statistics () {
           percent (statistics.deleted, statistics.added));
   printf ("c %-20s %20zu %12.2f %% added\n", "inputs:", statistics.inputs,
           percent (statistics.inputs, statistics.added));
+  printf ("c %-20s %20zu %12.2f %% conclusions\n",
+          "justifications:", statistics.justifications,
+          percent (statistics.justifications, statistics.conclusions));
   printf ("c %-20s %20zu %12.2f %% added\n", "lemmas:", statistics.lemmas,
           percent (statistics.lemmas, statistics.added));
+  printf ("c %-20s %20zu %12.2f %% conclusions\n",
+          "models:", statistics.models,
+          percent (statistics.models, statistics.conclusions));
   printf ("c %-20s %20zu %12.2f per decision\n",
           "propagations:", statistics.propagations,
           average (statistics.propagations, statistics.decisions));

@@ -410,7 +410,7 @@ RESTART:
       parse_error ("expected space or new-line after '%d'", lit);
     if (ch == '\n') { // TODO what about continued lines (e.g., 'v' lines)?
       if (lit)
-	parse_error ("expected zero literal '0' before new-line");
+        parse_error ("expected zero literal '0' before new-line");
       return actual_type;
     }
     if (!lit)
@@ -435,9 +435,11 @@ static void unexpected_line (int type, const char *expected) {
 }
 
 static struct {
+  size_t added;
   size_t decisions;
   size_t deleted;
   size_t inputs;
+  size_t imported;
   size_t lemmas;
   size_t propagations;
   size_t queries;
@@ -447,7 +449,7 @@ static struct {
 
 struct clause {
 #ifndef NDEBUG
-  size_t lineno;
+  size_t id, lineno;
 #endif
   unsigned size;
   bool active;
@@ -476,8 +478,7 @@ static void import_literals () {
     import_literal (lit);
 }
 
-static void literal_imported (int lit) {
-}
+static void literal_imported (int lit) {}
 
 static void literals_imported () {
   debug ("checking literals imported");
@@ -497,11 +498,13 @@ static void add_clause (bool input) {
   assert (file);
 #ifndef NDEBUG
   c->lineno = file->start_of_line + 1;
+  c->id = statistics.added;
 #endif
   c->size = size;
   c->active = true;
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
+  statistics.added++;
 }
 
 static void save_query () {
@@ -779,15 +782,32 @@ static void release (void) {
   free (matrix);
 }
 
+static double average (double a, double b) { return b ? a / b : 0; }
+
+static double percent (double a, double b) { return average (100 * a, b); }
+
 static void print_statistics () {
-  printf ("c %-20s %20zu\n", "decisions:", statistics.decisions);
-  printf ("c %-20s %20zu\n", "deleted:", statistics.deleted);
-  printf ("c %-20s %20zu\n", "inputs:", statistics.inputs);
-  printf ("c %-20s %20zu\n", "lemmas:", statistics.lemmas);
-  printf ("c %-20s %20zu\n", "propagations:", statistics.propagations);
+  printf ("c %-20s %20zu %12.2f per variable\n", "added:", statistics.added,
+          average (statistics.added, statistics.imported));
+  printf ("c %-20s %20zu %12.2f per lemma\n",
+          "decisions:", statistics.decisions,
+          average (statistics.decisions, statistics.lemmas));
+  printf ("c %-20s %20zu %12.2f %% added\n", "deleted:", statistics.deleted,
+          percent (statistics.deleted, statistics.added));
+  printf ("c %-20s %20zu %12.2f %% added\n", "inputs:", statistics.inputs,
+          percent (statistics.inputs, statistics.added));
+  printf ("c %-20s %20zu %12.2f %% added\n", "lemmas:", statistics.lemmas,
+          percent (statistics.lemmas, statistics.added));
+  printf ("c %-20s %20zu %12.2f per decision\n",
+          "propagations:", statistics.propagations,
+          average (statistics.propagations, statistics.decisions));
   printf ("c %-20s %20zu\n", "queries:", statistics.queries);
-  printf ("c %-20s %20zu\n", "restored:", statistics.restored);
-  printf ("c %-20s %20zu\n", "weakened:", statistics.weakened);
+  printf ("c %-20s %20zu %12.2f %% weakened\n",
+          "restored:", statistics.restored,
+          percent (statistics.restored, statistics.weakened));
+  printf ("c %-20s %20zu %12.2f %% inputs\n",
+          "weakened:", statistics.weakened,
+          percent (statistics.weakened, statistics.inputs));
 }
 
 int main (int argc, char **argv) {

@@ -158,6 +158,11 @@ struct ints {
   E##_PTR != E##_END && (E = *E##_PTR, 1); \
   ++E##_PTR
 
+#define all_pointers(TYPE, E, S) \
+  TYPE *E, **E##_PTR = BEGIN (S), **const E##_END = END (S); \
+  E##_PTR != E##_END && (E = *E##_PTR, 1); \
+  ++E##_PTR
+
 #define COPY(TYPE, DST, SRC) \
   do { \
     CLEAR (DST); \
@@ -181,8 +186,9 @@ static struct file *interactions = files + 0;
 static struct file *proof = files + 1;
 static struct file *file;
 
-static struct ints saved;
 static struct ints line;
+static struct ints saved;
+static struct ints query;
 
 static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
@@ -243,6 +249,25 @@ static void type_error (const char *fmt, ...) {
   vfprintf (stderr, fmt, ap);
   va_end (ap);
   fputc ('\n', stderr);
+  exit (1);
+}
+
+static void line_error (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void line_error (const char *fmt, ...) {
+  assert (file);
+  fflush (stdout);
+  fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
+           file->start_of_line + 1, file->name);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  for (all_elements (int, lit, line))
+    printf ("%d ", lit);
+  fputs ("0\n", stderr);
   exit (1);
 }
 
@@ -458,20 +483,22 @@ struct clause {
 };
 
 #define begin_literals(C) ((C)->lits)
+
 #define end_literals(C) (begin_literals (C) + (C)->size)
+
 #define all_literals(LIT, C) \
   int LIT, *P_##LIT = begin_literals (C), *END_##LIT = end_literals (C); \
   P_##LIT != END_##LIT && (LIT = *P_##LIT, true); \
   P_##LIT++
 
-struct watches {
+struct clauses {
   struct clause **begin, **end, **allocated;
 };
 
 static int max_var;
 static size_t allocated;
 
-static struct watches *matrix;
+static struct clauses *matrix;
 static signed char *values;
 static bool *imported;
 
@@ -481,6 +508,7 @@ static struct {
 } trail;
 
 static size_t inconsistent;
+static struct clauses empty_clauses;
 
 static void import_literal (int lit) {
   assert (lit);
@@ -499,7 +527,7 @@ static void import_literal (int lit) {
       debug ("reallocating from %zu to %zu variables", allocated,
              new_allocated);
 
-      struct watches *new_matrix =
+      struct clauses *new_matrix =
           calloc (2 * new_allocated, sizeof *new_matrix);
       new_matrix += new_allocated;
       if (max_var)
@@ -605,34 +633,15 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
 #endif
 
 static void assign_unit (int lit) {
-  debug ("assign %s as unit", debug_literal (lit));
+  debug ("assigning %s as unit", debug_literal (lit));
   PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
   trail.units++;
 }
 
-#if 0
-static void assign_decision (int lit) {
-  debug ("assign %s as decision", debug_literal (lit));
-  PUSH (trail, lit);
-  values[-lit] = -1;
-  values[lit] = 1;
-}
-#endif
-
-#if 0
-static void assign_propagated (int lit, struct clause *c) {
-  debug_clause (c, "assign %s reason", debug_literal (lit));
-  PUSH (trail, lit);
-  values[-lit] = -1;
-  values[lit] = 1;
-  (void) c;
-}
-#endif
-
-static void watch_clause (int lit, struct clause * c) {
-  debug_clause (c, "watching %s in", debug_literal (lit)); 
+static void watch_clause (int lit, struct clause *c) {
+  debug_clause (c, "watching %s in", debug_literal (lit));
   PUSH (matrix[lit], c);
 }
 
@@ -658,7 +667,9 @@ static void add_clause (bool input) {
 
   debug_clause (c, "added");
 
-  {
+  if (!size)
+    PUSH (empty_clauses, c);
+  else {
     int *lits = c->lits;
     for (size_t i = 0; i != 2 && i != size; i++) {
       int watch = lits[i];
@@ -715,10 +726,120 @@ static void add_clause (bool input) {
 
 static void save_query () {
   debug ("saving query");
+  COPY (int, query, line);
   statistics.queries++;
 }
 
-static void check_implied () { debug ("checking implied"); }
+static void assign_propagated (int lit, struct clause *c) {
+  debug_clause (c, "assigning %s forced by", debug_literal (lit));
+  PUSH (trail, lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  (void) c;
+}
+
+static bool propagate () {
+  assert (!inconsistent);
+  assert (trail.propagate <= SIZE (trail));
+  bool res = true;
+  while (res && trail.propagate != SIZE (trail)) {
+    int lit = trail.begin[trail.propagate++];
+    debug ("propagating %s", debug_literal (lit));
+    statistics.propagations++;
+    int not_lit = -lit;
+    struct clauses *watches = matrix + not_lit;
+    struct clause **watches_end = watches->end;
+    struct clause **q = watches->begin, **p = q;
+    while (res && p != watches_end) {
+      struct clause *c = *q++ = *p++;
+      debug_clause (c, "visiting");
+      int *lits = c->lits;
+      int other_watch = lits[0] ^ lits[1] ^ not_lit;
+      signed char other_watch_value = values[other_watch];
+      if (other_watch_value > 0) {
+        debug ("satisfied by %s", debug_literal (other_watch));
+        continue;
+      }
+      int *r = lits + 2, *end_lits = lits + c->size;
+      signed char replacement_value = -1;
+      int replacement = 0;
+      while (r != end_lits) {
+        replacement = *r;
+        replacement_value = values[replacement];
+        if (replacement_value >= 0)
+          break;
+        r++;
+      }
+      if (replacement_value >= 0) {
+        debug_clause (c, "unwatching %s in", debug_literal (not_lit));
+        *r = not_lit;
+        lits[0] = other_watch;
+        lits[1] = replacement;
+        watch_clause (replacement, c);
+      } else if (!other_watch_value)
+        assign_propagated (other_watch, c);
+      else {
+        assert (other_watch_value < 0);
+        debug_clause (c, "conflict");
+        res = false;
+      }
+    }
+    while (p != watches_end)
+      *q++ = *p++;
+    watches->end = q;
+  }
+  return res;
+}
+
+static void assume_decision (int lit) {
+  debug ("assuming and assigning %s as decision", debug_literal (lit));
+  PUSH (trail, lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  statistics.decisions++;
+}
+
+static void backtrack () {
+  assert (!inconsistent);
+  debug ("backtracking");
+  while (trail.propagate > trail.units) {
+    int lit = trail.begin[--trail.propagate];
+    debug ("unassigning %s", debug_literal (lit));
+    assert (values[lit] > 0);
+    values[lit] = values[-lit] = 0;
+  }
+}
+
+static void check_implied () {
+  if (inconsistent)
+    return;
+  if (trail.units < trail.propagate) {
+    if (!propagate ()) {
+      message ("root-level unit propagation yields conflict");
+      inconsistent = true;
+      return;
+    }
+  }
+  debug ("checking implied");
+  bool implied = false;
+  for (all_elements (int, lit, line)) {
+    signed char value = values[lit];
+    if (value < 0)
+      continue;
+    if (value > 0) {
+      debug ("literal %s already satisfied", debug_literal (lit));
+      implied = true;
+      break;
+    }
+    assume_decision (-lit);
+  }
+  if (!implied && propagate ())
+    line_error ("lemma not implied:");
+  if (trail.propagate == trail.units)
+    debug ("no need to backtrack");
+  else
+    backtrack ();
+}
 
 static struct clause *find_clause (bool active) {
   debug ("finding clause");
@@ -984,14 +1105,39 @@ static int parse_and_check_in_relaxed_mode () {
   return 1;
 }
 
+static void release_watches () {
+  for (int lit = -max_var; lit <= max_var; lit++) {
+    struct clauses *watches = matrix + lit;
+    for (all_pointers (struct clause, c, *watches)) {
+      if (c->size < 2)
+        free (c);
+      else {
+        int *lits = c->lits;
+        int other = lits[0] ^ lits[1] ^ lit;
+        if (other < lit)
+          free (c);
+      }
+    }
+    RELEASE (*watches);
+  }
+}
+
+static void release_empty_clauses () {
+  for (all_pointers (struct clause, c, empty_clauses))
+    free (c);
+  RELEASE (empty_clauses);
+}
+
 static void release (void) {
   RELEASE (line);
   RELEASE (saved);
+  RELEASE (query);
   RELEASE (trail);
   values -= allocated;
   free (values);
-  for (int lit = -max_var; lit <= max_var; lit++)
-    RELEASE (matrix[lit]);
+  if (max_var)
+    release_watches ();
+  release_empty_clauses ();
   matrix -= allocated;
   free (matrix);
   free (imported);

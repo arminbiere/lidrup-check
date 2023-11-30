@@ -259,6 +259,21 @@ static unsigned level;
 
 #ifndef NDEBUG
 
+static void debug (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void debug (const char *fmt, ...) {
+  if (verbosity != INT_MAX)
+    return;
+  printf ("c DEBUG %u ", level);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
 static void debug_print_parsed_line (int type) {
   if (verbosity < INT_MAX)
     return;
@@ -288,6 +303,12 @@ static void debug_print_parsed_line (int type) {
   fputc ('\n', stdout);
   fflush (stdout);
 }
+
+#else
+
+#define debug(...) \
+  do { \
+  } while (0)
 
 #endif
 
@@ -496,31 +517,6 @@ static struct {
 
 static size_t inconsistent;
 static struct clauses empty_clauses;
-
-#ifndef NDEBUG
-
-static void debug (const char *, ...)
-    __attribute__ ((format (printf, 1, 2)));
-
-static void debug (const char *fmt, ...) {
-  if (verbosity != INT_MAX)
-    return;
-  printf ("c DEBUG %u ", level);
-  va_list ap;
-  va_start (ap, fmt);
-  vprintf (fmt, ap);
-  va_end (ap);
-  fputc ('\n', stdout);
-  fflush (stdout);
-}
-
-#else
-
-#define debug(...) \
-  do { \
-  } while (0)
-
-#endif
 
 static void import_literal (int lit) {
   assert (lit);

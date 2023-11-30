@@ -104,7 +104,7 @@ static void message (const char *fmt, ...) {
 #define debug(...) \
   do { \
     if (verbosity == INT_MAX) \
-      message (__VA_ARGS__); \
+      message ("DEBUG " __VA_ARGS__); \
   } while (0)
 
 #else
@@ -247,11 +247,11 @@ static void type_error (const char *fmt, ...) {
 
 #ifndef NDEBUG
 
-static void print_parsed_line (int type) {
+static void debug_print_parsed_line (int type) {
   if (verbosity < INT_MAX)
     return;
   assert (file);
-  printf ("c parsed line %zu in '%s': ", file->lineno, file->name);
+  printf ("c DEBUG parsed line %zu in '%s': ", file->lineno, file->name);
   switch (type) {
   case 'p':
     fputs ("p ", stdout);
@@ -276,12 +276,6 @@ static void print_parsed_line (int type) {
   fputc ('\n', stdout);
   fflush (stdout);
 }
-
-#else
-
-#define print_parsed_line(...) \
-  do { \
-  } while (0)
 
 #endif
 
@@ -423,7 +417,9 @@ RESTART:
 
 static inline int next_line (char default_type) {
   int type = next_line_without_printing (default_type);
-  print_parsed_line (type);
+#ifndef NDEBUG
+  debug_print_parsed_line (type);
+#endif
   return type;
 }
 
@@ -613,7 +609,7 @@ static void save_line () {
   goto NAME; \
   NAME: \
   if (verbosity == INT_MAX) \
-    fputs ("c " #NAME " \n", stdout);
+    fputs ("c DEBUG STATE " #NAME " \n", stdout);
 #else
 #define STATE(NAME) \
   goto NAME; \

@@ -104,7 +104,7 @@ static void message (const char *fmt, ...) {
 #define debug(...) \
   do { \
     if (verbosity == INT_MAX) \
-      message ("DEBUG " __VA_ARGS__); \
+      message (__VA_ARGS__); \
   } while (0)
 
 #else
@@ -187,8 +187,8 @@ static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
 static const char *status;
 
-static const char *const ICNF = "ICNF";
-// static const char * const CNF = "CNF"; // TODO
+static const char *const ICNF = "icnf";
+// static const char * const CNF = "cnf"; // TODO
 static const char *cnf_file_type;
 
 static inline void set_file (struct file *new_file) {
@@ -253,6 +253,11 @@ static void print_parsed_line (int type) {
   assert (file);
   printf ("c parsed line %zu in '%s': ", file->lineno, file->name);
   switch (type) {
+  case 'p':
+    fputs ("p ", stdout);
+    assert (cnf_file_type);
+    fputs (cnf_file_type, stdout);
+    break;
   case 's':
     fputs ("s ", stdout);
     assert (status);
@@ -265,6 +270,7 @@ static void print_parsed_line (int type) {
     fputc (type, stdout);
     for (const int *p = line.begin; p != line.end; p++)
       printf (" %d", *p);
+    fputs (" 0", stdout);
     break;
   }
   fputc ('\n', stdout);
@@ -332,7 +338,10 @@ RESTART:
     if (next_char () != '\n')
       parse_error ("expected new line after 'p icnf' header");
     cnf_file_type = ICNF;
+
     // TODO parse 'p cnf <vars> <clauses>' header too.
+    // TODO parse 'p idrup' header?
+
     return 'p';
   }
 
@@ -398,9 +407,14 @@ RESTART:
     int lit = sign * idx;
     if (ch != ' ' && ch != '\n')
       parse_error ("expected space or new-line after '%d'", lit);
-    PUSH (line, lit);
-    if (ch == '\n') // TODO what about continued lines (e.g., 'v' lines)?
+    if (ch == '\n') { // TODO what about continued lines (e.g., 'v' lines)?
+      if (lit)
+	parse_error ("expected zero literal '0' before new-line");
       return actual_type;
+    }
+    if (!lit)
+      parse_error ("zero literal '0' without immediate new-line");
+    PUSH (line, lit);
     assert (ch == ' ');
     ch = next_char ();
   }
@@ -451,16 +465,21 @@ static signed char *values;
 static struct ints trail;
 // static size_t propagate;
 
-static void import_literal (int lit) {}
+static void import_literal (int lit) {
+  debug ("importing literal %d", lit);
+}
 
 static void import_literals () {
+  debug ("importing literals");
   for (all_elements (int, lit, line))
     import_literal (lit);
 }
 
-static void literal_imported (int lit) {}
+static void literal_imported (int lit) {
+}
 
 static void literals_imported () {
+  debug ("checking literals imported");
   for (all_elements (int, lit, line))
     literal_imported (lit);
 }
@@ -484,27 +503,35 @@ static void add_clause (bool input) {
   memcpy (c->lits, line.begin, lits_bytes);
 }
 
-static void save_query () { statistics.queries++; }
+static void save_query () {
+  debug ("saving query");
+  statistics.queries++;
+}
 
-static void check_implied () {}
+static void check_implied () { debug ("checking implied"); }
 
-static struct clause *find_clause (bool active) { return 0; }
+static struct clause *find_clause (bool active) {
+  debug ("finding clause");
+  return 0;
+}
 
-static void delete_clause (struct clause *) {}
+static void delete_clause (struct clause *) { debug ("deleting clause"); }
 
-static void weaken_clause (struct clause *) {}
+static void weaken_clause (struct clause *) { debug ("weakening clause"); }
 
-static void restore_clause (struct clause *c) {}
+static void restore_clause (struct clause *c) {
+  debug ("restoring clause");
+}
 
-static void check_model () {}
+static void check_model () { debug ("checking model"); }
 
-static void justify_core () {}
+static void justify_core () { debug ("justifying core"); }
 
-static void consistent_line () {}
+static void consistent_line () { debug ("checking conistency"); }
 
-static void subset_saved () {}
+static void subset_saved () { debug ("checking subset saved"); }
 
-static void superset_saved () {}
+static void superset_saved () { debug ("checking superset saved"); }
 
 static void import_add_input () {
   import_literals ();
@@ -540,7 +567,25 @@ static void imported_find_weaken_clause () {
   statistics.weakened++;
 }
 
+static bool is_learn_delete_restore_or_weaken (int type) {
+  return type == 'l' || type == 'd' || type == 'r' || type == 'w';
+}
+
+static void learn_delete_restore_or_weaken (int type) {
+  if (type == 'l')
+    import_check_add_lemma ();
+  else if (type == 'd')
+    imported_find_delete_clause ();
+  else if (type == 'r')
+    imported_find_restore_clause ();
+  else {
+    assert (type == 'w');
+    imported_find_weaken_clause ();
+  }
+}
+
 static void match_saved (const char *type_str) {
+  debug ("matching saved line");
   if (SIZE (line) != SIZE (saved))
   SAVED_LINE_DOES_NOT_MATCH:
     type_error ("%s line does not match", type_str);
@@ -554,16 +599,21 @@ static void match_saved (const char *type_str) {
       p++, q++;
 }
 
-static void save_line () { COPY (int, saved, line); }
+static void save_line () {
+  debug ("saving line");
+  COPY (int, saved, line);
+}
 
 #ifndef NDEBUG
 #define STATE(NAME) \
   goto NAME; \
-NAME: \
+  NAME: \
   if (verbosity == INT_MAX) \
     fputs ("c " #NAME " \n", stdout);
 #else
-#define STATE(NAME) goto NAME;NAME:
+#define STATE(NAME) \
+  goto NAME; \
+  NAME:
 #endif
 
 static int parse_and_check_in_pedantic_mode () {
@@ -577,7 +627,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-  STATE (INTERACTION_INPUT)
+    STATE (INTERACTION_INPUT)
     set_file (interactions);
     int type = next_line ('i');
     switch (type) {
@@ -595,57 +645,52 @@ static int parse_and_check_in_pedantic_mode () {
     default:
       unexpected_line (type, "'i' or 'q'");
     }
+    goto PROOF_INPUT;
   }
   {
-  STATE (PROOF_INPUT)
+    STATE (PROOF_INPUT)
     set_file (proof);
     int type = next_line ('i');
-    if (type == 'i') {
+    if (type == 'i')
       match_saved ("input");
-      goto INTERACTION_INPUT;
-    } else if (type == 'l') {
-      import_check_add_lemma ();
+    else if (!is_learn_delete_restore_or_weaken (type))
+      unexpected_line (type, "'i', 'l', 'd', 'r' or 'w'");
+    else {
+      learn_delete_restore_or_weaken (type);
       goto PROOF_INPUT;
-    } else if (type == 'd') {
-      imported_find_delete_clause ();
-      goto PROOF_INPUT;
-    } else
-      unexpected_line (type, "'i', 'l', or 'd'");
+    }
+    goto INTERACTION_INPUT;
   }
   {
-  STATE (PROOF_QUERY)
+    STATE (PROOF_QUERY)
     set_file (proof);
     int type = next_line (0);
-    if (type != 'q')
-      unexpected_line (type, "'q'");
-    match_saved ("query");
-    goto PROOF_CHECK;
+    if (type == 'q') {
+      match_saved ("query");
+      goto PROOF_CHECK;
+    }
+    if (!is_learn_delete_restore_or_weaken (type))
+      unexpected_line (type, "'q', 'l', 'd', 'r' or 'w'");
+    else
+      learn_delete_restore_or_weaken (type);
+    goto PROOF_QUERY;
   }
   {
-  STATE (PROOF_CHECK)
+    STATE (PROOF_CHECK)
     set_file (proof);
     int type = next_line ('l');
-    if (type == 'l') {
-      import_check_add_lemma ();
-      goto PROOF_CHECK;
-    } else if (type == 'd') {
-      imported_find_delete_clause ();
-      goto PROOF_CHECK;
-    } else if (type == 'r') {
-      imported_find_restore_clause ();
-      goto PROOF_CHECK;
-    } else if (type == 'w') {
-      imported_find_weaken_clause ();
+    if (is_learn_delete_restore_or_weaken (type)) {
+      learn_delete_restore_or_weaken (type);
       goto PROOF_CHECK;
     } else if (type != 's')
-      unexpected_line (type, "'s'");
+      unexpected_line (type, "'s', 'l', 'd', 'r' or 'w'");
     else if (status == SATISFIABLE)
       goto INTERACTION_SATISFIABLE;
     else
       goto INTERACTION_UNSATISFIABLE;
   }
   {
-  STATE (INTERACTION_SATISFIABLE)
+    STATE (INTERACTION_SATISFIABLE)
     set_file (interactions);
     int type = next_line (0);
     if (type != 's')
@@ -656,7 +701,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_SATISFIED;
   }
   {
-  STATE (INTERACTION_UNSATISFIABLE)
+    STATE (INTERACTION_UNSATISFIABLE)
     set_file (interactions);
     int type = next_line (0);
     if (type != 's')
@@ -668,7 +713,7 @@ static int parse_and_check_in_pedantic_mode () {
     ;
   }
   {
-  STATE (INTERACTION_SATISFIED)
+    STATE (INTERACTION_SATISFIED)
     set_file (interactions);
     int type = next_line (0);
     if (type != 'v')
@@ -678,7 +723,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_VALUES;
   }
   {
-  STATE (PROOF_VALUES)
+    STATE (PROOF_VALUES)
     set_file (proof);
     int type = next_line (0);
     if (type != 'v')
@@ -689,7 +734,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-  STATE (INTERACTION_UNSATISFIED)
+    STATE (INTERACTION_UNSATISFIED)
     set_file (interactions);
     int type = next_line (0);
     if (type != 'j')
@@ -699,7 +744,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_JUSTIFY;
   }
   {
-  STATE (PROOF_JUSTIFY)
+    STATE (PROOF_JUSTIFY)
     set_file (proof);
     int type = next_line (0);
     if (type != 'j')

@@ -475,8 +475,12 @@ static struct watches *matrix;
 static signed char *values;
 static bool *imported;
 
-static struct ints trail;
-// static size_t propagate;
+static struct {
+  int *begin, *end, *allocated;
+  unsigned propagate, units;
+} trail;
+
+static size_t inconsistent;
 
 static void import_literal (int lit) {
   assert (lit);
@@ -600,6 +604,38 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   } while (false)
 #endif
 
+static void assign_unit (int lit) {
+  debug ("assign %s as unit", debug_literal (lit));
+  PUSH (trail, lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  trail.units++;
+}
+
+#if 0
+static void assign_decision (int lit) {
+  debug ("assign %s as decision", debug_literal (lit));
+  PUSH (trail, lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+}
+#endif
+
+#if 0
+static void assign_propagated (int lit, struct clause *c) {
+  debug_clause (c, "assign %s reason", debug_literal (lit));
+  PUSH (trail, lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  (void) c;
+}
+#endif
+
+static void watch_clause (int lit, struct clause * c) {
+  debug_clause (c, "watching %s in", debug_literal (lit)); 
+  PUSH (matrix[lit], c);
+}
+
 static void add_clause (bool input) {
   size_t size = SIZE (line);
   if (size > UINT_MAX)
@@ -619,7 +655,62 @@ static void add_clause (bool input) {
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
   statistics.added++;
+
   debug_clause (c, "added");
+
+  {
+    int *lits = c->lits;
+    for (size_t i = 0; i != 2 && i != size; i++) {
+      int watch = lits[i];
+      if (values[watch] < 0)
+        for (size_t j = i + 1; j != size; j++) {
+          int lit = lits[j];
+          if (values[lit] >= 0) {
+            debug ("better watch %s than %s", debug_literal (lit),
+                   debug_literal (watch));
+            lits[j] = watch;
+            lits[i] = watch = lit;
+            break;
+          }
+        }
+      watch_clause (watch, c);
+    }
+  }
+
+  int unit = 0;
+  for (all_literals (lit, c)) {
+    signed char value = values[lit];
+    if (value > 0) {
+      debug_clause (c, "literal %s satisfies", debug_literal (lit));
+      return;
+    } else if (!value) {
+      if (unit)
+        return;
+      unit = lit;
+    }
+  }
+
+  if (unit) {
+    assign_unit (unit);
+  } else if (size) {
+    debug_clause (c, "all literals falsified in");
+    if (!inconsistent) {
+      if (input)
+        message ("inconsistent input clause");
+      else
+        message ("derived inconsistent clause");
+      inconsistent = true;
+    }
+  } else {
+    debug_clause (c, "empty");
+    if (!inconsistent) {
+      if (input)
+        message ("empty input clause");
+      else
+        message ("derived empty clause");
+      inconsistent = true;
+    }
+  }
 }
 
 static void save_query () {
@@ -899,8 +990,8 @@ static void release (void) {
   RELEASE (trail);
   values -= allocated;
   free (values);
-  for (int lit = -max_var; lit != max_var; lit++)
-    free (matrix[lit].begin);
+  for (int lit = -max_var; lit <= max_var; lit++)
+    RELEASE (matrix[lit]);
   matrix -= allocated;
   free (matrix);
   free (imported);

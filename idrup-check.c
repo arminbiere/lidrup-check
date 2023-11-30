@@ -278,7 +278,8 @@ static void debug_print_parsed_line (int type) {
   if (verbosity < INT_MAX)
     return;
   assert (file);
-  printf ("c DEBUG %u parsed line %zu in '%s': ", level, file->lineno, file->name);
+  printf ("c DEBUG %u parsed line %zu in '%s': ", level, file->lineno,
+          file->name);
   switch (type) {
   case 'p':
     fputs ("p ", stdout);
@@ -515,7 +516,8 @@ static struct {
   unsigned propagate, units;
 } trail;
 
-static size_t inconsistent;
+static bool failed;
+static bool inconsistent;
 static struct clauses empty_clauses;
 
 static void import_literal (int lit) {
@@ -578,7 +580,7 @@ static void import_literal (int lit) {
   }
 }
 
-static void import_literals () {
+static void import_literals (void) {
   debug ("importing literals");
   for (all_elements (int, lit, line))
     import_literal (lit);
@@ -586,7 +588,7 @@ static void import_literals () {
 
 static void literal_imported (int lit) {}
 
-static void literals_imported () {
+static void literals_imported (void) {
   debug ("checking literals imported");
   for (all_elements (int, lit, line))
     literal_imported (lit);
@@ -600,7 +602,7 @@ static void literals_imported () {
 static char debug_buffer[capacity_debug_buffer][debug_buffer_line_size];
 static size_t next_debug_buffer_position;
 
-static char *next_debug_buffer () {
+static char *next_debug_buffer (void) {
   char *res = debug_buffer[next_debug_buffer_position++];
   if (next_debug_buffer_position == capacity_debug_buffer)
     next_debug_buffer_position = 0;
@@ -662,6 +664,26 @@ static void watch_clause (int lit, struct clause *c) {
   PUSH (matrix[lit], c);
 }
 
+static void backtrack (unsigned new_level) {
+  assert (!inconsistent);
+  assert (new_level < level);
+  debug ("backtracking to decision level %u", new_level);
+  while (trail.end > trail.begin) {
+    int lit = trail.end[-1];
+    assert (values[lit] > 0);
+    if (levels[abs (lit)] == new_level)
+      break;
+    debug ("unassigning %s", debug_literal (lit));
+    assert (values[lit] > 0);
+    values[lit] = values[-lit] = 0;
+    trail.end--;
+  }
+  size_t new_trail_size = SIZE (trail);
+  assert (trail.units <= new_trail_size);
+  trail.propagate = new_trail_size;
+  level = new_level;
+}
+
 static void add_clause (bool input) {
   size_t size = SIZE (line);
   if (size > UINT_MAX)
@@ -672,6 +694,7 @@ static void add_clause (bool input) {
   if (!c)
     out_of_memory ("allocating clause of size %zu", size);
   assert (file);
+  statistics.added++;
 #ifndef NDEBUG
   c->lineno = file->start_of_line + 1;
   c->id = statistics.added;
@@ -680,7 +703,6 @@ static void add_clause (bool input) {
   c->active = true;
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
-  statistics.added++;
 
   debug_clause (c, "added");
 
@@ -719,6 +741,10 @@ static void add_clause (bool input) {
   }
 
   if (unit) {
+    if (level) {
+      debug ("unit forces backtracking");
+      backtrack (0);
+    }
     assign_unit (unit);
   } else if (size) {
     debug_clause (c, "all literals falsified in");
@@ -741,21 +767,45 @@ static void add_clause (bool input) {
   }
 }
 
-static void save_query () {
+static void reset_query (void) {
+  if (!level && !failed) {
+    debug ("no need to reset query");
+    return;
+  }
+  debug ("resetting query");
+  if (level)
+    backtrack (0);
+  if (failed) {
+    debug ("resetting failed");
+    failed = false;
+  }
+}
+
+static void save_query (void) {
   debug ("saving query");
   COPY (int, query, line);
   statistics.queries++;
+  assert (!failed);
+  assert (!level);
 }
 
 static void assign_propagated (int lit, struct clause *c) {
-  debug_clause (c, "assigning %s forced by", debug_literal (lit));
   PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
+  levels[abs (lit)] = level;
+  debug_clause (c, "assigning %s forced by", debug_literal (lit));
   (void) c;
 }
 
-static bool propagate () {
+void internally_check_watches_sane (void) {
+  for (int lit = -max_var; lit <= max_var; lit++)
+    for (all_pointers (struct clause, c, matrix[lit]))
+      assert (c->lits[0] == lit || c->lits[1] == lit);
+}
+
+static bool propagate (void) {
+  internally_check_watches_sane ();
   assert (!inconsistent);
   assert (trail.propagate <= SIZE (trail));
   bool res = true;
@@ -793,6 +843,7 @@ static bool propagate () {
         lits[0] = other_watch;
         lits[1] = replacement;
         watch_clause (replacement, c);
+        q--;
       } else if (!other_watch_value)
         assign_propagated (other_watch, c);
       else {
@@ -805,61 +856,98 @@ static bool propagate () {
       *q++ = *p++;
     watches->end = q;
   }
+  internally_check_watches_sane ();
   return res;
 }
 
-static void assume_decision (int lit) {
+static void assign_decision (int lit) {
+  level++;
   PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
+  levels[abs (lit)] = level;
   statistics.decisions++;
+  debug ("assigning %s as decision", debug_literal (lit));
+}
+
+static void assign_assumption (int lit) {
   level++;
-  debug ("assuming and assigning %s as decision", debug_literal (lit));
+  PUSH (trail, lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  levels[abs (lit)] = level;
+  statistics.decisions++;
+  debug ("assigning %s as assumption", debug_literal (lit));
 }
 
-static void backtrack () {
-  assert (!inconsistent);
-  assert (level);
-  debug ("backtracking");
-  while (trail.propagate > trail.units) {
-    int lit = trail.begin[--trail.propagate];
-    debug ("unassigning %s", debug_literal (lit));
-    assert (values[lit] > 0);
-    values[lit] = values[-lit] = 0;
-  }
-  level = 0;
-}
+static void check_implied (void) {
 
-static void check_implied () {
-  if (inconsistent)
+  if (inconsistent) {
+    debug ("skipping implication check as formula is inconsistent");
     return;
+  }
+
+  if (failed) {
+    debug ("skipping implication check as query failed");
+    return;
+  }
+
   if (trail.units < trail.propagate) {
+    if (level)
+      backtrack (0);
     if (!propagate ()) {
       message ("root-level unit propagation yields conflict");
       inconsistent = true;
       return;
     }
   }
-  debug ("checking implied");
+
+  size_t size_query = SIZE (query);
+#ifndef NDEBUG
+  assert (level <= size_query);
+  for (size_t i = 0; i != level; i++) {
+    int assumption = query.begin[i];
+    assert (values[assumption] > 0);
+  }
+#endif
+  while (!failed && level < size_query) {
+    int assumption = query.begin[level];
+    signed char value = values[assumption];
+    if (value < 0) {
+      debug ("assumption %s falsified", debug_literal (assumption));
+      failed = true;
+      goto IMPLICATION_CHECK_SUCCEEDED;
+    } else if (value > 0) {
+      debug ("assumption %s already satisfied", debug_literal (assumption));
+      level++;
+      debug ("faking decision");
+    } else {
+      assert (!value);
+      assign_assumption (assumption);
+    }
+  }
+
+  debug ("checking lemma is implied");
   bool implied = false;
   for (all_elements (int, lit, line)) {
     signed char value = values[lit];
     if (value < 0)
       continue;
     if (value > 0) {
-      debug ("literal %s already satisfied", debug_literal (lit));
+      debug ("literal %s in lemma already satisfied", debug_literal (lit));
       implied = true;
       break;
     }
-    assume_decision (-lit);
+    assign_decision (-lit);
   }
+
   if (!implied && propagate ())
-    line_error ("lemma not implied:");
-  if (trail.propagate == trail.units)
-    debug ("no need to backtrack");
-  else
-    backtrack ();
-  debug ("checking line implied succeeded");
+    line_error ("lemma not implied:"); // TODO test this!
+
+  if (level > size_query)
+    backtrack (size_query);
+IMPLICATION_CHECK_SUCCEEDED:
+  debug ("implication check succeeded");
 }
 
 static struct clause *find_clause (bool active) {
@@ -875,52 +963,54 @@ static void restore_clause (struct clause *c) {
   debug ("restoring clause");
 }
 
-static void check_model () {
+static void check_model (void) {
   debug ("checking model");
   statistics.conclusions++;
   statistics.models++;
+  reset_query ();
 }
 
-static void justify_core () {
+static void justify_core (void) {
   debug ("justifying core");
   statistics.conclusions++;
   statistics.justifications++;
+  reset_query ();
 }
 
-static void consistent_line () { debug ("checking consistency"); }
+static void consistent_line (void) { debug ("checking consistency"); }
 
-static void subset_saved () { debug ("checking subset saved"); }
+static void subset_saved (void) { debug ("checking subset saved"); }
 
-static void superset_saved () { debug ("checking superset saved"); }
+static void superset_saved (void) { debug ("checking superset saved"); }
 
-static void import_add_input () {
+static void import_add_input (void) {
   import_literals ();
   add_clause (true);
   statistics.inputs++;
 }
 
-static void import_check_add_lemma () {
+static void import_check_add_lemma (void) {
   import_literals ();
   check_implied ();
   add_clause (false);
   statistics.lemmas++;
 }
 
-static void imported_find_delete_clause () {
+static void imported_find_delete_clause (void) {
   literals_imported ();
   struct clause *c = find_clause (true);
   delete_clause (c);
   statistics.deleted++;
 }
 
-static void imported_find_restore_clause () {
+static void imported_find_restore_clause (void) {
   literals_imported ();
   struct clause *c = find_clause (false);
   restore_clause (c);
   statistics.restored++;
 }
 
-static void imported_find_weaken_clause () {
+static void imported_find_weaken_clause (void) {
   literals_imported ();
   struct clause *c = find_clause (true);
   weaken_clause (c);
@@ -957,26 +1047,37 @@ static void match_saved (const char *type_str) {
       goto SAVED_LINE_DOES_NOT_MATCH;
     else
       p++, q++;
+  debug ("saved line matched");
 }
 
-static void save_line () {
+static void save_line (void) {
   debug ("saving line");
   COPY (int, saved, line);
 }
 
 #ifndef NDEBUG
+
+static void debug_state (const char *name) {
+  if (verbosity < INT_MAX)
+    return;
+  size_t printed = printf ("c DEBUG %u ----[ %s ]", level, name);
+  while (printed++ != 73)
+    fputc ('-', stdout);
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
 #define STATE(NAME) \
   goto NAME; \
   NAME: \
-  if (verbosity == INT_MAX) \
-    printf ("c DEBUG %u STATE " #NAME " \n", level)
+  debug_state (#NAME)
 #else
 #define STATE(NAME) \
   goto NAME; \
   NAME:
 #endif
 
-static int parse_and_check_in_pedantic_mode () {
+static int parse_and_check_in_pedantic_mode (void) {
   verbose ("starting interactions and proof checking in strict mode");
   {
     STATE (INTERACTION_HEADER);
@@ -996,7 +1097,6 @@ static int parse_and_check_in_pedantic_mode () {
       save_line ();
       goto PROOF_INPUT;
     case 'q':
-      save_query ();
       save_line ();
       goto PROOF_QUERY;
     case 0:
@@ -1027,6 +1127,7 @@ static int parse_and_check_in_pedantic_mode () {
     int type = next_line (0);
     if (type == 'q') {
       match_saved ("query");
+      save_query ();
       goto PROOF_CHECK;
     }
     if (!is_learn_delete_restore_or_weaken (type))
@@ -1116,36 +1217,42 @@ static int parse_and_check_in_pedantic_mode () {
   }
 }
 
-static int parse_and_check_in_strict_mode () {
+static int parse_and_check_in_strict_mode (void) {
   die ("strict checking mode not implemented yet");
   return 1;
 }
 
-static int parse_and_check_in_relaxed_mode () {
+static int parse_and_check_in_relaxed_mode (void) {
   die ("relaxed checking mode not implemented yet");
   return 1;
 }
 
-static void release_watches () {
+static void free_clause (struct clause *c) {
+  debug ("freeing clause at %p", (void *) c);
+  debug_clause (c, "free");
+  free (c);
+}
+
+static void release_watches (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size < 2)
-        free (c);
+        free_clause (c);
       else {
         int *lits = c->lits;
         int other = lits[0] ^ lits[1] ^ lit;
         if (other < lit)
-          free (c);
+          free_clause (c);
       }
     }
     RELEASE (*watches);
   }
 }
 
-static void release_empty_clauses () {
+static void release_empty_clauses (void) {
   for (all_pointers (struct clause, c, empty_clauses))
-    free (c);
+    free_clause (c);
   RELEASE (empty_clauses);
 }
 
@@ -1153,14 +1260,14 @@ static void release (void) {
   RELEASE (line);
   RELEASE (saved);
   RELEASE (query);
-  RELEASE (trail);
-  values -= allocated;
-  free (values);
   if (max_var)
     release_watches ();
   release_empty_clauses ();
+  RELEASE (trail);
   matrix -= allocated;
   free (matrix);
+  values -= allocated;
+  free (values);
   free (imported);
   free (levels);
 }
@@ -1169,7 +1276,7 @@ static void release (void) {
 #include <sys/time.h>
 #include <unistd.h>
 
-static double process_time () {
+static double process_time (void) {
   struct rusage u;
   double res;
   (void) getrusage (RUSAGE_SELF, &u);
@@ -1192,7 +1299,7 @@ static double average (double a, double b) { return b ? a / b : 0; }
 
 static double percent (double a, double b) { return average (100 * a, b); }
 
-static void print_statistics () {
+static void print_statistics (void) {
   double t = process_time ();
   printf ("c %-20s %20zu %12.2f per variable\n", "added:", statistics.added,
           average (statistics.added, statistics.imported));
@@ -1244,7 +1351,7 @@ static void print_statistics () {
 SIGNALS
 #undef SIGNAL
 
-static void reset_signals () {
+static void reset_signals (void) {
 #define SIGNAL(SIG) signal (SIG, saved_##SIG##_handler);
   SIGNALS
 #undef SIGNAL
@@ -1275,7 +1382,7 @@ static void catch_signal (int sig) {
   raise (sig);
 }
 
-static void init_signals () {
+static void init_signals (void) {
 #define SIGNAL(SIG) saved_##SIG##_handler = signal (SIG, catch_signal);
   SIGNALS
 }

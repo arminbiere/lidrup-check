@@ -897,10 +897,13 @@ int main (int argc, char **argv) {
   else
     res = parse_and_check_in_relaxed_mode ();
 
+  if (verbosity >= 0)
+    fputs ("c\n", stdout);
   if (res)
-    fputs ("\nc CHECKING FAILED\n", stdout);
+    fputs ("s FAILED\n", stdout);
   else
-    fputs ("\ns VERIFIED\n", stdout);
+    fputs ("s VERIFIED\n", stdout);
+  fflush (stdout);
 
   for (int i = 0; i != 2; i++) {
     verbose ("closing '%s' after reading %zu lines (%zu bytes)",

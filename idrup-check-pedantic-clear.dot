@@ -17,9 +17,10 @@ digraph "idrup-check" {
   INTERACTION_INPUT -> PROOF_QUERY [label=" q ",weight=2,color=orange3,fontsize=20,fontcolor=orange3];
 
   PROOF_INPUT -> INTERACTION_INPUT [label=" i ",weight=3];
-  PROOF_INPUT -> PROOF_INPUT [label=" l | d "];
+  PROOF_INPUT -> PROOF_INPUT [label=" l | d | r | w"];
 
   PROOF_QUERY -> PROOF_CHECK [label=" q "];
+  PROOF_QUERY -> PROOF_QUERY [label=" l | d | r | w"];
 
   PROOF_CHECK [fontsize=20];
   PROOF_CHECK -> PROOF_CHECK [label=" l | d | r | w ",dir=back,fontsize=20];

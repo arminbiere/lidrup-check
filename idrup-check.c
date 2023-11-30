@@ -556,10 +556,24 @@ static void match_saved (const char *type_str) {
 
 static void save_line () { COPY (int, saved, line); }
 
+#ifndef NDEBUG
+
+#define STATE(NAME) \
+  goto NAME; \
+NAME: \
+  if (verbosity == INT_MAX) \
+    fputs ("c " #NAME " \n", stdout);
+
+#else
+
+#define STATE(NAME) goto NAME;NAME:
+
+#endif
+
 static int parse_and_check_in_pedantic_mode () {
   verbose ("starting interactions and proof checking in strict mode");
   {
-    // INTERACTION_HEADER:
+    STATE (INTERACTION_HEADER)
     set_file (interactions);
     int type = next_line (0);
     if (type != 'p')
@@ -567,7 +581,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-  INTERACTION_INPUT:
+  STATE (INTERACTION_INPUT)
     set_file (interactions);
     int type = next_line ('i');
     switch (type) {
@@ -587,7 +601,7 @@ static int parse_and_check_in_pedantic_mode () {
     }
   }
   {
-  PROOF_INPUT:
+  STATE (PROOF_INPUT)
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i') {
@@ -603,7 +617,7 @@ static int parse_and_check_in_pedantic_mode () {
       unexpected_line (type, "'i', 'l', or 'd'");
   }
   {
-  PROOF_QUERY:
+  STATE (PROOF_QUERY)
     set_file (proof);
     int type = next_line (0);
     if (type != 'q')
@@ -612,7 +626,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_CHECK;
   }
   {
-  PROOF_CHECK:
+  STATE (PROOF_CHECK)
     set_file (proof);
     int type = next_line ('l');
     if (type == 'l') {
@@ -635,7 +649,7 @@ static int parse_and_check_in_pedantic_mode () {
       goto INTERACTION_UNSATISFIABLE;
   }
   {
-  INTERACTION_SATISFIABLE:
+  STATE (INTERACTION_SATISFIABLE)
     set_file (interactions);
     int type = next_line (0);
     if (type != 's')
@@ -646,7 +660,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_SATISFIED;
   }
   {
-  INTERACTION_UNSATISFIABLE:
+  STATE (INTERACTION_UNSATISFIABLE)
     set_file (interactions);
     int type = next_line (0);
     if (type != 's')
@@ -658,7 +672,7 @@ static int parse_and_check_in_pedantic_mode () {
     ;
   }
   {
-  INTERACTION_SATISFIED:
+  STATE (INTERACTION_SATISFIED)
     set_file (interactions);
     int type = next_line (0);
     if (type != 'v')
@@ -668,7 +682,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_VALUES;
   }
   {
-  PROOF_VALUES:
+  STATE (PROOF_VALUES)
     set_file (proof);
     int type = next_line (0);
     if (type != 'v')
@@ -679,7 +693,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-  INTERACTION_UNSATISFIED:
+  STATE (INTERACTION_UNSATISFIED)
     set_file (interactions);
     int type = next_line (0);
     if (type != 'j')
@@ -689,7 +703,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_JUSTIFY;
   }
   {
-  PROOF_JUSTIFY:
+  STATE (PROOF_JUSTIFY)
     set_file (proof);
     int type = next_line (0);
     if (type != 'j')

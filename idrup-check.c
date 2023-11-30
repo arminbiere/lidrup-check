@@ -402,6 +402,7 @@ RESTART:
       int digit = ch - '0';
       if (INT_MAX - digit < idx)
         parse_error ("index too large");
+      idx += digit;
     }
     assert (idx != INT_MIN);
     int lit = sign * idx;
@@ -527,7 +528,7 @@ static void check_model () { debug ("checking model"); }
 
 static void justify_core () { debug ("justifying core"); }
 
-static void consistent_line () { debug ("checking conistency"); }
+static void consistent_line () { debug ("checking consistency"); }
 
 static void subset_saved () { debug ("checking subset saved"); }
 

@@ -100,22 +100,6 @@ static void message (const char *fmt, ...) {
       message (__VA_ARGS__); \
   } while (0)
 
-#ifndef NDEBUG
-
-#define debug(...) \
-  do { \
-    if (verbosity == INT_MAX) \
-      message ("DEBUG " __VA_ARGS__); \
-  } while (0)
-
-#else
-
-#define debug(...) \
-  do { \
-  } while (0)
-
-#endif
-
 struct ints {
   int *begin, *end, *allocated;
 };
@@ -271,13 +255,15 @@ static void line_error (const char *fmt, ...) {
   exit (1);
 }
 
+static unsigned level;
+
 #ifndef NDEBUG
 
 static void debug_print_parsed_line (int type) {
   if (verbosity < INT_MAX)
     return;
   assert (file);
-  printf ("c DEBUG parsed line %zu in '%s': ", file->lineno, file->name);
+  printf ("c DEBUG %u parsed line %zu in '%s': ", level, file->lineno, file->name);
   switch (type) {
   case 'p':
     fputs ("p ", stdout);
@@ -500,6 +486,7 @@ static size_t allocated;
 
 static struct clauses *matrix;
 static signed char *values;
+static unsigned *levels;
 static bool *imported;
 
 static struct {
@@ -509,6 +496,31 @@ static struct {
 
 static size_t inconsistent;
 static struct clauses empty_clauses;
+
+#ifndef NDEBUG
+
+static void debug (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void debug (const char *fmt, ...) {
+  if (verbosity != INT_MAX)
+    return;
+  printf ("c DEBUG %u ", level);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
+#else
+
+#define debug(...) \
+  do { \
+  } while (0)
+
+#endif
 
 static void import_literal (int lit) {
   assert (lit);
@@ -547,11 +559,18 @@ static void import_literal (int lit) {
       free (values);
       values = new_values;
 
+      unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
+      for (int idx = 1; idx <= max_var; idx++)
+        new_levels[idx] = levels[idx];
+      free (levels);
+      levels = new_levels;
+
       bool *new_imported = calloc (new_allocated, sizeof *new_imported);
       for (int idx = 1; idx <= max_var; idx++)
         new_imported[idx] = imported[idx];
       free (imported);
       imported = new_imported;
+
       allocated = new_allocated;
     }
     max_var = idx;
@@ -596,7 +615,8 @@ static const char *debug_literal (int lit) {
   char *res = next_debug_buffer ();
   int value = values[lit];
   if (value)
-    snprintf (res, debug_buffer_line_size, "%d=%d", lit, value);
+    snprintf (res, debug_buffer_line_size, "%d@%u=%d", lit,
+              levels[abs (lit)], value);
   else
     snprintf (res, debug_buffer_line_size, "%d", lit);
   return res;
@@ -608,7 +628,7 @@ static void debug_clause (struct clause *, const char *, ...)
 static void debug_clause (struct clause *c, const char *fmt, ...) {
   if (verbosity < INT_MAX)
     return;
-  fputs ("c DEBUG ", stdout);
+  printf ("c DEBUG %u ", level);
   va_list ap;
   va_start (ap, fmt);
   vprintf (fmt, ap);
@@ -633,10 +653,11 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
 #endif
 
 static void assign_unit (int lit) {
-  debug ("assigning %s as unit", debug_literal (lit));
   PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
+  levels[abs (lit)] = level;
+  debug ("assigning %s as unit", debug_literal (lit));
   trail.units++;
 }
 
@@ -792,15 +813,17 @@ static bool propagate () {
 }
 
 static void assume_decision (int lit) {
-  debug ("assuming and assigning %s as decision", debug_literal (lit));
   PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
   statistics.decisions++;
+  level++;
+  debug ("assuming and assigning %s as decision", debug_literal (lit));
 }
 
 static void backtrack () {
   assert (!inconsistent);
+  assert (level);
   debug ("backtracking");
   while (trail.propagate > trail.units) {
     int lit = trail.begin[--trail.propagate];
@@ -808,6 +831,7 @@ static void backtrack () {
     assert (values[lit] > 0);
     values[lit] = values[-lit] = 0;
   }
+  level = 0;
 }
 
 static void check_implied () {
@@ -839,6 +863,7 @@ static void check_implied () {
     debug ("no need to backtrack");
   else
     backtrack ();
+  debug ("checking line implied succeeded");
 }
 
 static struct clause *find_clause (bool active) {
@@ -948,7 +973,7 @@ static void save_line () {
   goto NAME; \
   NAME: \
   if (verbosity == INT_MAX) \
-    fputs ("c DEBUG STATE " #NAME " \n", stdout);
+    printf ("c DEBUG %u STATE " #NAME " \n", level)
 #else
 #define STATE(NAME) \
   goto NAME; \
@@ -958,7 +983,7 @@ static void save_line () {
 static int parse_and_check_in_pedantic_mode () {
   verbose ("starting interactions and proof checking in strict mode");
   {
-    STATE (INTERACTION_HEADER)
+    STATE (INTERACTION_HEADER);
     set_file (interactions);
     int type = next_line (0);
     if (type != 'p')
@@ -966,7 +991,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-    STATE (INTERACTION_INPUT)
+    STATE (INTERACTION_INPUT);
     set_file (interactions);
     int type = next_line ('i');
     switch (type) {
@@ -987,7 +1012,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_INPUT;
   }
   {
-    STATE (PROOF_INPUT)
+    STATE (PROOF_INPUT);
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i')
@@ -1001,7 +1026,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-    STATE (PROOF_QUERY)
+    STATE (PROOF_QUERY);
     set_file (proof);
     int type = next_line (0);
     if (type == 'q') {
@@ -1015,7 +1040,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_QUERY;
   }
   {
-    STATE (PROOF_CHECK)
+    STATE (PROOF_CHECK);
     set_file (proof);
     int type = next_line ('l');
     if (is_learn_delete_restore_or_weaken (type)) {
@@ -1029,7 +1054,7 @@ static int parse_and_check_in_pedantic_mode () {
       goto INTERACTION_UNSATISFIABLE;
   }
   {
-    STATE (INTERACTION_SATISFIABLE)
+    STATE (INTERACTION_SATISFIABLE);
     set_file (interactions);
     int type = next_line (0);
     if (type != 's')
@@ -1040,7 +1065,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_SATISFIED;
   }
   {
-    STATE (INTERACTION_UNSATISFIABLE)
+    STATE (INTERACTION_UNSATISFIABLE);
     set_file (interactions);
     int type = next_line (0);
     if (type != 's')
@@ -1052,7 +1077,7 @@ static int parse_and_check_in_pedantic_mode () {
     ;
   }
   {
-    STATE (INTERACTION_SATISFIED)
+    STATE (INTERACTION_SATISFIED);
     set_file (interactions);
     int type = next_line (0);
     if (type != 'v')
@@ -1062,7 +1087,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_VALUES;
   }
   {
-    STATE (PROOF_VALUES)
+    STATE (PROOF_VALUES);
     set_file (proof);
     int type = next_line (0);
     if (type != 'v')
@@ -1073,7 +1098,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto INTERACTION_INPUT;
   }
   {
-    STATE (INTERACTION_UNSATISFIED)
+    STATE (INTERACTION_UNSATISFIED);
     set_file (interactions);
     int type = next_line (0);
     if (type != 'j')
@@ -1083,7 +1108,7 @@ static int parse_and_check_in_pedantic_mode () {
     goto PROOF_JUSTIFY;
   }
   {
-    STATE (PROOF_JUSTIFY)
+    STATE (PROOF_JUSTIFY);
     set_file (proof);
     int type = next_line (0);
     if (type != 'j')
@@ -1141,6 +1166,7 @@ static void release (void) {
   matrix -= allocated;
   free (matrix);
   free (imported);
+  free (levels);
 }
 
 #include <sys/resource.h>

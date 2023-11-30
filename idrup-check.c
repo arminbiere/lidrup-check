@@ -409,7 +409,7 @@ RESTART:
       return actual_type;
     }
     if (!lit)
-      parse_error ("zero literal '0' without immediate new-line");
+      parse_error ("zero literal '0' without new-line");
     PUSH (line, lit);
     assert (ch == ' ');
     ch = next_char ();
@@ -457,19 +457,78 @@ struct clause {
   int lits[];
 };
 
+#define begin_literals(C) ((C)->lits)
+#define end_literals(C) (begin_literals (C) + (C)->size)
+#define all_literals(LIT, C) \
+  int LIT, *P_##LIT = begin_literals (C), *END_##LIT = end_literals (C); \
+  P_##LIT != END_##LIT && (LIT = *P_##LIT, true); \
+  P_##LIT++
+
 struct watches {
   struct clause **begin, **end, **allocated;
 };
 
 static int max_var;
-static int allocated_variables;
+static size_t allocated;
+
 static struct watches *matrix;
 static signed char *values;
+static bool *imported;
+
 static struct ints trail;
 // static size_t propagate;
 
 static void import_literal (int lit) {
-  debug ("importing literal %d", lit);
+  assert (lit);
+  assert (lit != INT_MIN);
+  int idx = abs (lit);
+  if (idx <= max_var)
+    return;
+  if (idx == INT_MAX)
+    parse_error ("can not handle INT_MAX variables");
+  if (idx > max_var) {
+    debug ("new maximum variable index %d", idx);
+    if ((unsigned) idx >= allocated) {
+      size_t new_allocated = allocated ? 2 * allocated : 1;
+      while ((unsigned) idx >= new_allocated)
+        new_allocated *= 2;
+      debug ("reallocating from %zu to %zu variables", allocated,
+             new_allocated);
+
+      struct watches *new_matrix =
+          calloc (2 * new_allocated, sizeof *new_matrix);
+      new_matrix += new_allocated;
+      if (max_var)
+        for (int lit = -max_var; lit <= max_var; lit++)
+          new_matrix[lit] = matrix[lit];
+      matrix -= allocated;
+      free (matrix);
+      matrix = new_matrix;
+
+      signed char *new_values =
+          calloc (2 * new_allocated, sizeof *new_values);
+      new_values += new_allocated;
+      if (max_var)
+        for (int lit = -max_var; lit <= max_var; lit++)
+          new_values[lit] = values[lit];
+      values -= allocated;
+      free (values);
+      values = new_values;
+
+      bool *new_imported = calloc (new_allocated, sizeof *new_imported);
+      for (int idx = 1; idx <= max_var; idx++)
+        new_imported[idx] = imported[idx];
+      free (imported);
+      imported = new_imported;
+      allocated = new_allocated;
+    }
+    max_var = idx;
+  }
+  if (!imported[idx]) {
+    imported[idx] = true;
+    statistics.imported++;
+    debug ("imported variable %d", idx);
+  }
 }
 
 static void import_literals () {
@@ -485,6 +544,61 @@ static void literals_imported () {
   for (all_elements (int, lit, line))
     literal_imported (lit);
 }
+
+#ifndef NDEBUG
+
+#define capacity_debug_buffer 2
+#define debug_buffer_line_size 64
+
+static char debug_buffer[capacity_debug_buffer][debug_buffer_line_size];
+static size_t next_debug_buffer_position;
+
+static char *next_debug_buffer () {
+  char *res = debug_buffer[next_debug_buffer_position++];
+  if (next_debug_buffer_position == capacity_debug_buffer)
+    next_debug_buffer_position = 0;
+  return res;
+}
+
+static const char *debug_literal (int lit) {
+  char *res = next_debug_buffer ();
+  int value = values[lit];
+  if (value)
+    snprintf (res, debug_buffer_line_size, "%d=%d", lit, value);
+  else
+    snprintf (res, debug_buffer_line_size, "%d", lit);
+  return res;
+}
+
+static void debug_clause (struct clause *, const char *, ...)
+    __attribute__ ((format (printf, 2, 3)));
+
+static void debug_clause (struct clause *c, const char *fmt, ...) {
+  if (verbosity < INT_MAX)
+    return;
+  fputs ("c DEBUG ", stdout);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  if (c->input)
+    fputs (" input", stdout);
+  else
+    fputs (" lemma", stdout);
+  if (!c->active)
+    fputs (" inactive", stdout);
+  printf (" size %u line %zu clause[%zu]", c->size, c->lineno, c->id);
+  for (all_literals (lit, c))
+    printf (" %s", debug_literal (lit));
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
+#else
+#define debug_clause(...) \
+  do { \
+  } while (false)
+#endif
 
 static void add_clause (bool input) {
   size_t size = SIZE (line);
@@ -505,6 +619,7 @@ static void add_clause (bool input) {
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
   statistics.added++;
+  debug_clause (c, "added");
 }
 
 static void save_query () {
@@ -782,12 +897,13 @@ static void release (void) {
   RELEASE (line);
   RELEASE (saved);
   RELEASE (trail);
-  values += allocated_variables;
+  values -= allocated;
   free (values);
   for (int lit = -max_var; lit != max_var; lit++)
     free (matrix[lit].begin);
-  matrix += allocated_variables;
+  matrix -= allocated;
   free (matrix);
+  free (imported);
 }
 
 #include <sys/resource.h>

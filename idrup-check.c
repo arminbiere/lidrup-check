@@ -236,10 +236,10 @@ static void type_error (const char *fmt, ...) {
   exit (1);
 }
 
-static void line_error (const char *, ...)
-    __attribute__ ((format (printf, 1, 2)));
+static void line_error (int type, const char *, ...)
+    __attribute__ ((format (printf, 2, 3)));
 
-static void line_error (const char *fmt, ...) {
+static void line_error (int type, const char *fmt, ...) {
   assert (file);
   fflush (stdout);
   fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
@@ -249,9 +249,10 @@ static void line_error (const char *fmt, ...) {
   vfprintf (stderr, fmt, ap);
   va_end (ap);
   fputc ('\n', stderr);
+  fputc (type, stderr);
   for (all_elements (int, lit, line))
-    printf ("%d ", lit);
-  fputs ("0\n", stderr);
+    fprintf (stderr, " %d", lit);
+  fputs (" 0\n", stderr);
   exit (1);
 }
 
@@ -708,28 +709,55 @@ static void add_clause (bool input) {
 
   if (!size)
     PUSH (empty_clauses, c);
+  else if (size == 1)
+    watch_clause (c->lits[0], c);
   else {
     int *lits = c->lits;
-    for (size_t i = 0; i != 2 && i != size; i++) {
+    for (size_t i = 0; i != 2; i++) {
       int watch = lits[i];
-      if (values[watch] < 0)
-        for (size_t j = i + 1; j != size; j++) {
-          int lit = lits[j];
-          if (values[lit] >= 0) {
-            debug ("better watch %s than %s", debug_literal (lit),
-                   debug_literal (watch));
-            lits[j] = watch;
-            lits[i] = watch = lit;
+      signed char watch_value = values[watch];
+      if (!watch_value)
+        continue;
+      unsigned watch_level = levels[abs (watch)];
+      for (size_t j = i + 1; j != size; j++) {
+        int lit = lits[j];
+        signed char lit_value = values[lit];
+        unsigned lit_level = levels[abs (lit)];
+        if (!lit_value || watch_level < lit_level ||
+            (watch_level == lit_level && watch_value < lit_value)) {
+          lits[j] = watch;
+          lits[i] = lit;
+          if (!lit_value)
             break;
-          }
+          watch_level = lit_level;
+          watch_value = lit_value;
+          watch = lit;
         }
-      watch_clause (watch, c);
+      }
     }
+    int lit0 = lits[0], lit1 = lits[1];
+    debug ("watches %s and %s", debug_literal (lit0), debug_literal (lit1));
+    signed char val1 = values[lit1];
+    if (val1 >= 0)
+      debug ("second lower level watch not falsified");
+    else {
+      debug ("second lower level watch falsified");
+      signed char val0 = values[lit0];
+      unsigned level0 = levels[abs (lit0)];
+      unsigned level1 = levels[abs (lit1)];
+      if (level1)
+	if (val0 <= 0 || level0 > level1)
+	  backtrack (level1 - 1);
+    }
+    watch_clause (lit0, c);
+    watch_clause (lit1, c);
   }
 
   int unit = 0;
   for (all_literals (lit, c)) {
     signed char value = values[lit];
+    if (levels[abs (lit)])
+      value = 0;
     if (value > 0) {
       debug_clause (c, "literal %s satisfies", debug_literal (lit));
       return;
@@ -768,7 +796,7 @@ static void add_clause (bool input) {
 }
 
 static void reset_query (void) {
-  if (!level && !failed) {
+  if (inconsistent || (!level && !failed)) {
     debug ("no need to reset query");
     return;
   }
@@ -942,7 +970,7 @@ static void check_implied (void) {
   }
 
   if (!implied && propagate ())
-    line_error ("lemma not implied:"); // TODO test this!
+    line_error ('l', "lemma not implied:"); // TODO test this!
 
   if (level > size_query)
     backtrack (size_query);

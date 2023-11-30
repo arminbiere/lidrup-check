@@ -782,11 +782,35 @@ static void release (void) {
   free (matrix);
 }
 
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+static double process_time () {
+  struct rusage u;
+  double res;
+  (void) getrusage (RUSAGE_SELF, &u);
+  res = u.ru_utime.tv_sec + 1e-6 * u.ru_utime.tv_usec;
+  res += u.ru_stime.tv_sec + 1e-6 * u.ru_stime.tv_usec;
+  return res;
+}
+
+static size_t maximum_resident_set_size (void) {
+  struct rusage u;
+  (void) getrusage (RUSAGE_SELF, &u);
+  return ((size_t) u.ru_maxrss) << 10;
+}
+
+static double mega_bytes (void) {
+  return maximum_resident_set_size () / (double) (1 << 20);
+}
+
 static double average (double a, double b) { return b ? a / b : 0; }
 
 static double percent (double a, double b) { return average (100 * a, b); }
 
 static void print_statistics () {
+  double t = process_time ();
   printf ("c %-20s %20zu %12.2f per variable\n", "added:", statistics.added,
           average (statistics.added, statistics.imported));
   printf ("c %-20s %20zu %12.2f per lemma\n",
@@ -801,13 +825,19 @@ static void print_statistics () {
   printf ("c %-20s %20zu %12.2f per decision\n",
           "propagations:", statistics.propagations,
           average (statistics.propagations, statistics.decisions));
-  printf ("c %-20s %20zu\n", "queries:", statistics.queries);
+  printf ("c %-20s %20zu %12.2f per second\n",
+          "queries:", statistics.queries, average (t, statistics.queries));
   printf ("c %-20s %20zu %12.2f %% weakened\n",
           "restored:", statistics.restored,
           percent (statistics.restored, statistics.weakened));
   printf ("c %-20s %20zu %12.2f %% inputs\n",
           "weakened:", statistics.weakened,
           percent (statistics.weakened, statistics.inputs));
+  fputs ("c\n", stdout);
+  double m = mega_bytes ();
+  printf ("c %-20s %33.2f seconds\n", "process-time:", t);
+  printf ("c %-20s %25.2f MB\n", "bymaximum-resident-set-size:", m);
+  fflush (stdout);
 }
 
 int main (int argc, char **argv) {

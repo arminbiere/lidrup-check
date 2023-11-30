@@ -37,6 +37,7 @@ static const char * idrup_check_usage =
 #include <assert.h>
 #include <ctype.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -526,7 +527,7 @@ static void restore_clause (struct clause *c) {
   debug ("restoring clause");
 }
 
-static void check_model () { 
+static void check_model () {
   debug ("checking model");
   statistics.conclusions++;
   statistics.models++;
@@ -856,6 +857,54 @@ static void print_statistics () {
   fflush (stdout);
 }
 
+#define SIGNALS \
+  SIGNAL (SIGABRT) \
+  SIGNAL (SIGBUS) \
+  SIGNAL (SIGILL) \
+  SIGNAL (SIGINT) \
+  SIGNAL (SIGSEGV) \
+  SIGNAL (SIGTERM)
+
+#define SIGNAL(SIG) static void (*saved_##SIG##_handler) (int);
+SIGNALS
+#undef SIGNAL
+
+static void reset_signals () {
+#define SIGNAL(SIG) signal (SIG, saved_##SIG##_handler);
+  SIGNALS
+#undef SIGNAL
+}
+
+static const char *signal_name (int sig) {
+#define SIGNAL(SIG) \
+  if (sig == SIG) \
+    return #SIG;
+  SIGNALS
+#undef SIGNAL
+  return "SIGUNKNOWN";
+}
+
+static volatile int caught_signal;
+
+static void catch_signal (int sig) {
+  if (caught_signal)
+    return;
+  caught_signal = 0;
+  reset_signals ();
+  if (verbosity >= 0) {
+    printf ("c\nc caught signal %d (%s)\nc\n", sig, signal_name (sig));
+    print_statistics ();
+    printf ("c\nc raising signal %d (%s)\n", sig, signal_name (sig));
+    fflush (stdout);
+  }
+  raise (sig);
+}
+
+static void init_signals () {
+#define SIGNAL(SIG) saved_##SIG##_handler = signal (SIG, catch_signal);
+  SIGNALS
+}
+
 int main (int argc, char **argv) {
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
@@ -899,6 +948,9 @@ int main (int argc, char **argv) {
 
   message ("Interaction DRUP Checker Version 0.0.0");
   message ("Copyright (c) 2023 University of Freiburg");
+
+  init_signals ();
+
   if (verbosity >= 0)
     fputs ("c\n", stdout);
   message ("reading incremental CNF '%s'", files[0].name);
@@ -932,6 +984,7 @@ int main (int argc, char **argv) {
   }
 
   release ();
+  reset_signals ();
 
   if (verbosity >= 0) {
     printf ("c\n");

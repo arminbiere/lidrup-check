@@ -906,16 +906,23 @@ int main (int argc, char **argv) {
   fflush (stdout);
 
   for (int i = 0; i != 2; i++) {
-    verbose ("closing '%s' after reading %zu lines (%zu bytes)",
-             files[i].name, files[i].lineno, files[i].charno);
+    if (verbosity > 0) {
+      if (!i)
+        fputs ("c\n", stdout);
+      message ("closing '%s' after reading %zu lines (%zu bytes)",
+               files[i].name, files[i].lineno, files[i].charno);
+    }
     fclose (files[i].file);
   }
+
   release ();
+
   if (verbosity >= 0) {
     printf ("c\n");
     print_statistics ();
     printf ("c\nc exit %d\n", res);
     fflush (stdout);
   }
+
   return res;
 }

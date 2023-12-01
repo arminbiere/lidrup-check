@@ -114,12 +114,18 @@ static volatile bool completed;
 static void (*saved) (int);
 
 static volatile uint64_t fuzzed;
+static volatile uint64_t repetitions;
+static bool limited = false;
 
 static double average (double a, double b) { return b ? a / b : 0; }
 static double percent (double a, double b) { return average (100 * a, b); }
 
 static void statistics () {
-  printf ("fuzzed %" PRIu64 " interactions\n", fuzzed);
+  if (limited)
+    printf ("fuzzed %" PRIu64 " interactions %.0f%%\n", fuzzed,
+            percent (fuzzed, repetitions));
+  else
+    printf ("fuzzed %" PRIu64 " interactions\n", fuzzed);
   fflush (stdout);
 }
 
@@ -156,6 +162,7 @@ static void fuzz (uint64_t rng) {
     printf (" %u %u %u", vars, clauses, calls), fflush (stdout);
   FILE *icnf = write_to_file ("/tmp/idrup-fuzz.icnf");
   CCaDiCaL *solver = ccadical_init ();
+  fputs ("p icnf\n", icnf);
   unsigned subset = (clauses + calls - 1) / calls;
   if (!quiet)
     fputs (" [", stdout), fflush (stdout);
@@ -179,6 +186,7 @@ static void fuzz (uint64_t rng) {
         k = 3;
       assert (k <= vars);
       int clause[k];
+      fputc ('i', icnf);
       for (unsigned j = 0; j != k; j++) {
       RESTART:
         int idx = pick (&rng, 1, vars);
@@ -188,7 +196,11 @@ static void fuzz (uint64_t rng) {
         int sign = pick (&rng, 0, 1) ? -1 : 1;
         int lit = sign * idx;
         clause[j] = lit;
+        ccadical_add (solver, lit);
+        fprintf (icnf, " %d", lit);
       }
+      ccadical_add (solver, 0);
+      fputs (" 0\n", icnf);
     }
   }
   fclose (icnf);
@@ -198,8 +210,8 @@ static void fuzz (uint64_t rng) {
 }
 
 int main (int argc, char **argv) {
-  bool seeded = false, limited = false;
-  uint64_t rng = 0, repetitions = 0;
+  bool seeded = false;
+  uint64_t rng = 0;
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h")) {

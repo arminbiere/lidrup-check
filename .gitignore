@@ -1,4 +1,4 @@
 makefile
 idrup-check
-idrup-fuzzer
+idrup-fuzz
 *.pdf

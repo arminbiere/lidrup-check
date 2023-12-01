@@ -12,6 +12,7 @@ static const char * usage =
 "  <seed>             random number generator seed\n"
 "  [-]<repetitions>   number of repetitions (default infinity)\n"
 "\n"
+
 "If one number is given then its sign determines whether it is specifying\n"
 "the overall fuzzing seed or the number of repetitions.  With two numbers\n"
 "given a positive one specifies the seed and a negative one the number\n"
@@ -20,8 +21,11 @@ static const char * usage =
 "assumed to be decimal encoded and parsed as 64-bit number in the range\n"
 "0 to 2^64-1 (18446744073709551615).  If the number of repetitions is\n"
 "unspecified fuzzing runs without limit.  Without a seed specified\n"
-"a random seed is generated based the process identifier and\n"
-"the processor clock cycles.\n"
+"a random seed is generated based on the process identifier and the\n"
+"processor clock cycles.  If a seed is specified but no repition then\n"
+"only a single fuzzing test with this seed is run.  This is useful to\n"
+"rerun and debug a failing fuzzing run.\n"
+
 ;
 
 // clang-format on

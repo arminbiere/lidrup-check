@@ -221,12 +221,12 @@ static void fuzz (uint64_t rng) {
       fputc ('v', icnf);
       unsigned values = pick (&rng, 0, vars);
       for (unsigned i = 0; i != values; i++) {
-	int idx = pick (&rng, 1, vars);
-	int sign = pick (&rng, 0, 1) ? -1 : 1;
-	int lit = idx * sign;
-	int val = ccadical_val (solver, lit);
-	fprintf (icnf, " %d", val);
-	concluded = true;
+        int idx = pick (&rng, 1, vars);
+        int sign = pick (&rng, 0, 1) ? -1 : 1;
+        int lit = idx * sign;
+        int val = ccadical_val (solver, lit);
+        fprintf (icnf, " %d", val);
+        concluded = true;
       }
       fputs (" 0\n", icnf);
       fflush (icnf);
@@ -244,6 +244,38 @@ static void fuzz (uint64_t rng) {
   fclose (idrup);
   if (!quiet)
     fputs (" ]", stdout), fflush (stdout);
+
+#define ERR PATH ".err"
+#define LOG PATH ".log"
+#define REDIRECT " 1>" LOG " 2>" ERR
+#define CMD "./idrup-check " ICNF " " IDRUP
+
+  int res = system (CMD REDIRECT);
+  if (res) {
+    if (!quiet)
+      fputs (" FAILED\n", stdout), fflush (stdout);
+    fputs (CMD, stdout);
+    fputc ('\n', stdout);
+    fflush (stdout);
+    {
+      FILE *file = fopen (LOG, "r");
+      int ch;
+      while ((ch = getc (file)) != EOF)
+        fputc (ch, stdout);
+      fclose (file);
+      fflush (stdout);
+    }
+    {
+      FILE *file = fopen (ERR, "r");
+      int ch;
+      while ((ch = getc (file)) != EOF)
+        fputc (ch, stderr);
+      fclose (file);
+      fflush (stderr);
+    }
+    exit (1);
+  } else if (!quiet)
+    fputs (" checked", stdout), fflush (stdout);
 }
 
 int main (int argc, char **argv) {

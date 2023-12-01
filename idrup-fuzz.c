@@ -1,3 +1,31 @@
+// clang-format off
+static const char * usage =
+"usage: idrup-fuzz [ <option> ... ] [ <number> [ <number> ] ]\n"
+"\n"
+"where '<option>' is one of the following two\n"
+"\n"
+" -h                print this command line option summary\n"
+" -q                be quiet and do not print any messages\n"
+"\n"
+"and '<number> one of these\n"
+"\n"
+" <seed>            random number generator seed\n"
+" [-]<repetitions>  number of repetitions (default infinity)\n"
+"\n"
+"If one number is given then its sign determines whether it is specifying\n"
+"the overall fuzzing seed or the number of repetitions.  With two numbers\n"
+"given a positive one specifies the seed and a negative one the number\n"
+"of repetitions.  If both are positive the second specifies the number\n"
+"of repetitions.  Two negative numbers are invalid.  All numbers are\n"
+"assumed to be decimal encoded and parsed as 64-bit number in the range\n"
+"0 to 2^64-1 (18446744073709551615).  If the number of repetitions is\n"
+"unspecified fuzzing runs without limit.  Without a seed specified\n"
+"a random seed is generated based the process identifier and\n"
+"the processor clock cycles.\n"
+;
+
+// clang-format on
+
 #include "ccadical.h"
 
 #include <assert.h>
@@ -63,6 +91,8 @@ static void msg (const char *fmt, ...) {
 }
 
 static bool parse_uint64_t (const char *str, uint64_t *res_ptr) {
+  if (!*str)
+    return false;
   const uint64_t MAX = ~(uint64_t) 0;
   uint64_t res = 0;
   unsigned char ch;
@@ -84,6 +114,9 @@ static volatile bool completed;
 static void (*saved) (int);
 
 static volatile uint64_t fuzzed;
+
+static double average (double a, double b) { return b ? a / b : 0; }
+static double percent (double a, double b) { return average (100 * a, b); }
 
 static void statistics () {
   printf ("fuzzed %" PRIu64 " interactions\n", fuzzed);
@@ -116,8 +149,8 @@ static FILE *write_to_file (const char *path) {
 
 static void fuzz (uint64_t rng) {
   unsigned vars = pick (&rng, 10, 100);
-  double ratio = pick (&rng, 350, 450);
-  unsigned clauses = vars * ratio / 100.0;
+  double ratio = pick (&rng, 3500, 4500);
+  unsigned clauses = vars * ratio / 1000.0;
   unsigned calls = pick (&rng, 1, 10);
   if (!quiet)
     printf (" %u %u %u", vars, clauses, calls), fflush (stdout);
@@ -142,6 +175,8 @@ static void fuzz (uint64_t rng) {
         k = 5;
       else if (!pick (&rng, 0, clauses / 10))
         k = 6;
+      else
+        k = 3;
       assert (k <= vars);
       int clause[k];
       for (unsigned j = 0; j != k; j++) {
@@ -163,45 +198,64 @@ static void fuzz (uint64_t rng) {
 }
 
 int main (int argc, char **argv) {
-  bool seeded = false, repeat = false;
+  bool seeded = false, limited = false;
   uint64_t rng = 0, repetitions = 0;
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h")) {
-      printf ("usage: idrup-fuzz [-h|-q] [ <seed> [ <repetitions> ]]\n");
+      fputs (usage, stdout);
       exit (0);
     } else if (!strcmp (arg, "-q"))
       quiet = true;
-    else if (arg[0] == '-')
-      die ("invalid command line option '%s' (try '-h')", arg);
-    else if (repeat)
+    else if (arg[0] == '-') {
+      uint64_t tmp;
+      if (!parse_uint64_t (arg + 1, &tmp))
+        die ("invalid command line option '%s' (try '-h')", arg);
+      if (limited)
+        die ("multiple repetition limits '%" PRIu64 "' and '%" PRIu64 "'",
+             repetitions, tmp);
+      repetitions = tmp;
+      limited = true;
+    } else if (seeded && limited)
       die ("too many arguments (try '-h')");
-    else if (!seeded) {
-      if (!parse_uint64_t (arg, &rng))
-        die ("invalid seed argument '%s'", arg);
-      seeded = true;
-    } else if (!parse_uint64_t (arg, &repetitions))
-      die ("invalid repetitions argument '%s'", arg);
-    else
-      repeat = true;
+    else {
+      uint64_t tmp;
+      if (!parse_uint64_t (arg, &tmp))
+        die ("invalid number '%s'", arg);
+      if (seeded) {
+        repetitions = tmp;
+        limited = true;
+      } else {
+        rng = tmp;
+        seeded = true;
+      }
+    }
   }
   msg ("IDrup Fuzzer Version 0.0");
   msg ("using %s", ccadical_signature ());
   if (seeded)
-    msg ("user specified seed %" PRIu64, rng);
+    msg ("specified seed %" PRIu64, rng);
   else {
     hash (getpid (), &rng);
     hash (clock (), &rng);
     msg ("random seed %" PRIu64, rng);
   }
+  if (limited)
+    msg ("running %" PRIu64 " repetitions", repetitions);
+  else
+    msg ("unlimited fuzzing");
   bool terminal = isatty (1);
   saved = signal (SIGINT, catch);
-  do {
+  for (;;) {
+    if (limited && fuzzed == repetitions)
+      break;
     fuzzed++;
     if (!quiet) {
       if (terminal)
         fputs ("\033[K\033[1G", stdout);
       printf ("%020" PRIu64 " %" PRIu64, rng, fuzzed);
+      if (limited)
+        printf (" %.0f%%", percent (fuzzed, repetitions));
       fflush (stdout);
     }
     completed = false;
@@ -212,7 +266,9 @@ int main (int argc, char **argv) {
     }
     completed = true;
     (void) next64 (&rng);
-  } while (!seeded || (repeat && fuzzed < repetitions));
+    if (!limited && seeded)
+      break;
+  }
   if (!quiet) {
     if (terminal)
       fputs ("\033[1G\033[K", stdout);

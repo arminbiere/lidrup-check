@@ -4,13 +4,14 @@ static const char * usage =
 "\n"
 "where '<option>' is one of the following two\n"
 "\n"
-"  -h                 print this command line option summary\n"
-"  -q                 be quiet and do not print any messages\n"
+"  -h | --help          print this command line option summary\n"
+"  -q | --quiet         be quiet and do not print any messages\n"
+"  -n | --no-terminal   assume stdout is not connected to a terminal\n"
 "\n"
 "and '<number> one of these\n"
 "\n"
-"  <seed>             random number generator seed\n"
-"  [-]<repetitions>   number of repetitions (default infinity)\n"
+"  <seed>               random number generator seed\n"
+"  [-]<repetitions>     number of repetitions (default infinity)\n"
 "\n"
 
 "If one number is given then its sign determines whether it is specifying\n"
@@ -33,6 +34,7 @@ static const char * usage =
 #include "ccadical.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -82,6 +84,17 @@ static void die (const char *fmt, ...) {
 }
 
 static bool quiet;
+static bool terminal;
+
+static void clear_to_end_of_line (void) {
+  if (!quiet && terminal)
+    fputs ("\033[K", stdout);
+}
+
+static void erase_line (void) {
+  if (!quiet && terminal)
+    fputs ("\033[1G", stdout);
+}
 
 static void msg (const char *fmt, ...) {
   if (quiet)
@@ -101,6 +114,8 @@ static bool parse_uint64_t (const char *str, uint64_t *res_ptr) {
   uint64_t res = 0;
   unsigned char ch;
   for (const char *p = str; (ch = *p); p++) {
+    if (!isdigit (ch))
+      return false;
     if (MAX / 10 < res)
       return false;
     res *= 10;
@@ -248,12 +263,14 @@ static void fuzz (uint64_t rng) {
 #define ERR PATH ".err"
 #define LOG PATH ".log"
 #define REDIRECT " 1>" LOG " 2>" ERR
-#define CMD "./idrup-check " ICNF " " IDRUP
+#define CMD "./idrup-check -v " ICNF " " IDRUP
 
   int res = system (CMD REDIRECT);
   if (res) {
-    if (!quiet)
+    if (!quiet) {
+      clear_to_end_of_line ();
       fputs (" FAILED\n", stdout), fflush (stdout);
+    }
     fputs (CMD, stdout);
     fputc ('\n', stdout);
     fflush (stdout);
@@ -280,14 +297,17 @@ static void fuzz (uint64_t rng) {
 
 int main (int argc, char **argv) {
   bool seeded = false;
+  terminal = isatty (1);
   uint64_t rng = 0;
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
-    if (!strcmp (arg, "-h")) {
+    if (!strcmp (arg, "-h") || !strcmp (arg, "--help")) {
       fputs (usage, stdout);
       exit (0);
-    } else if (!strcmp (arg, "-q"))
+    } else if (!strcmp (arg, "-q") || !strcmp (arg, "--quiet"))
       quiet = true;
+    else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-terminal"))
+      terminal = false;
     else if (arg[0] == '-') {
       uint64_t tmp;
       if (!parse_uint64_t (arg + 1, &tmp))
@@ -325,22 +345,21 @@ int main (int argc, char **argv) {
     msg ("running %" PRIu64 " repetitions", repetitions);
   else
     msg ("unlimited fuzzing");
-  bool terminal = isatty (1);
   saved = signal (SIGINT, catch);
   for (;;) {
     if (limited && fuzzed == repetitions)
       break;
     fuzzed++;
     if (!quiet) {
-      if (terminal)
-        fputs ("\033[K\033[1G", stdout);
       printf ("%020" PRIu64 " %" PRIu64, rng, fuzzed);
+      clear_to_end_of_line ();
       if (limited)
         printf (" %.0f%%", percent (fuzzed, repetitions));
       fflush (stdout);
     }
     completed = false;
     fuzz (rng);
+    erase_line ();
     if (!quiet && !terminal) {
       putc ('\n', stdout);
       fflush (stdout);
@@ -351,8 +370,8 @@ int main (int argc, char **argv) {
       break;
   }
   if (!quiet) {
-    if (terminal)
-      fputs ("\033[1G\033[K", stdout);
+    erase_line ();
+    clear_to_end_of_line ();
     statistics ();
   }
   return 0;

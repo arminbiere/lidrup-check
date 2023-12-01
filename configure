@@ -43,6 +43,51 @@ do
   shift
 done
 
+fuzzer=no
+cadical=no
+cadicaldir="../cadical"
+if [ -d $cadicaldir/ ]
+then
+  cadicalbuild=$cadicaldir/build
+  if [ -d $cadicalbuild/ ]
+  then
+    libcadical="$cadicalbuild/libcadical.a"
+    if [ -f $libcadical ]
+    then
+      cadicalinclude="$cadicaldir/src"
+      if [ -d $cadicalinclude/ ]
+      then
+        cadicalheader="$cadicalinclude/ccadical.h"
+	if [ -f $cadicalheader ]
+	then
+	  fuzzer=yes
+	  cadical=yes
+	  msg "found '$cadicalheader' header"
+	  msg "found '$libcadical' library"
+	else
+	  msg "could not find '$cadicalheader' header"
+        fi
+      else
+	msg "could not find '$cadicalinclude' source directory"
+      fi
+    else
+      msg "could not find '$libcadical' library"
+    fi
+  else
+    msg "could not find '$cadicalbuild' build directory"
+  fi
+else
+  msg "could not '$cadicaldir' root directory"
+fi
+
+if [ $fuzzer = yes ]
+then
+  msg "building and linking 'idrup-fuzz' fuzzer"
+  TARGETS="$TARGETS idrup-fuzz"
+else
+  msg "not building fuzzer (install and compile CaDiCaL in '../cadical/')"
+fi
+
 [ $check = undefined ] && check=$debug
 [ $symbols = undefined ] && symbols=$debug
 
@@ -53,6 +98,7 @@ COMPILE="gcc -Wall"
 [ $debug = no ] && COMPILE="$COMPILE -O3"
 
 msg "using '$COMPILE'"
+
 sed -e "s#@COMPILE@#$COMPILE#" \
     -e "s#@TARGETS@#$TARGETS#" \
     makefile.in > makefile

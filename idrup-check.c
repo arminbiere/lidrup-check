@@ -826,14 +826,7 @@ static void assign_propagated (int lit, struct clause *c) {
   (void) c;
 }
 
-void internally_check_watches_sane (void) {
-  for (int lit = -max_var; lit <= max_var; lit++)
-    for (all_pointers (struct clause, c, matrix[lit]))
-      assert (c->lits[0] == lit || c->lits[1] == lit);
-}
-
 static bool propagate (void) {
-  internally_check_watches_sane ();
   assert (!inconsistent);
   assert (trail.propagate <= SIZE (trail));
   bool res = true;
@@ -884,7 +877,6 @@ static bool propagate (void) {
       *q++ = *p++;
     watches->end = q;
   }
-  internally_check_watches_sane ();
   return res;
 }
 

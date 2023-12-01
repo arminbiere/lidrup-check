@@ -1,7 +1,10 @@
 COMPILE=@COMPILE@
 all: @TARGETS@
 idrup-check: idrup-check.c makefile
-	$(COMPILE) -o idrup-check idrup-check.c
+	$(COMPILE) -o $@ $<
+idrup-fuzz: idrup-fuzz.c makefile \
+../cadical/src/ccadical.h ../cadical/build/libcadical.a
+	$(COMPILE) -o $@ -I../cadical/src $< ../cadical/build/libcadical.a
 dots=$(wildcard *.dot)
 pdfs:$(dots:.dot=.pdf)
 .SUFFIXES: .dot .pdf

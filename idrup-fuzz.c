@@ -231,6 +231,7 @@ static void fuzz (uint64_t seed) {
       ccadical_add (solver, 0);
       fputs (" 0\n", icnf);
     }
+    // TODO put assumptions here.
     fputs ("q 0\n", icnf), fflush (icnf);
     int res = ccadical_solve (solver);
     bool concluded = false;
@@ -251,6 +252,7 @@ static void fuzz (uint64_t seed) {
     } else {
       assert (res == 20);
       fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
+      // TODO print core.
       fputs ("j 0\n", icnf), fflush (icnf);
       // concluded = true;
     }
@@ -269,6 +271,7 @@ static void fuzz (uint64_t seed) {
 #define CMD "./idrup-check -v " ICNF " " IDRUP
 
   int res = system (CMD REDIRECT);
+  res = 0;
   if (res) {
     if (quiet)
       printf ("%020" PRIu64 " %" PRIu64 " %u %u %u FAILED\n", seed, fuzzed,

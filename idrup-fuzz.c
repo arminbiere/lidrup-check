@@ -164,8 +164,15 @@ static void fuzz (uint64_t rng) {
   unsigned calls = pick (&rng, 1, 10);
   if (!quiet)
     printf (" %u %u %u", vars, clauses, calls), fflush (stdout);
-  FILE *icnf = write_to_file ("/tmp/idrup-fuzz.icnf");
+#define PATH "/tmp/idrup-fuzz"
+#define ICNF PATH ".icnf"
+#define IDRUP PATH ".idrup"
+  FILE *icnf = write_to_file (ICNF);
+  FILE *idrup = write_to_file (IDRUP);
   CCaDiCaL *solver = ccadical_init ();
+  ccadical_set_option (solver, "idrup", 1);
+  ccadical_set_option (solver, "binary", 0);
+  ccadical_trace_proof (solver, idrup, IDRUP);
   fputs ("p icnf\n", icnf);
   unsigned subset = (clauses + calls - 1) / calls;
   if (!quiet)
@@ -208,19 +215,35 @@ static void fuzz (uint64_t rng) {
     }
     fputs ("q 0\n", icnf), fflush (icnf);
     int res = ccadical_solve (solver);
+    bool concluded = false;
     if (res == 10) {
       fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
-      fputs ("v 0\n", icnf), fflush (icnf);
+      fputc ('v', icnf);
+      unsigned values = pick (&rng, 0, vars);
+      for (unsigned i = 0; i != values; i++) {
+	int idx = pick (&rng, 1, vars);
+	int sign = pick (&rng, 0, 1) ? -1 : 1;
+	int lit = idx * sign;
+	int val = ccadical_val (solver, lit);
+	fprintf (icnf, " %d", val);
+	concluded = true;
+      }
+      fputs (" 0\n", icnf);
+      fflush (icnf);
     } else {
       assert (res == 20);
       fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
       fputs ("j 0\n", icnf), fflush (icnf);
+      // concluded = true;
     }
+    if (!concluded)
+      ccadical_conclude (solver);
   }
+  ccadical_release (solver);
   fclose (icnf);
+  fclose (idrup);
   if (!quiet)
     fputs (" ]", stdout), fflush (stdout);
-  ccadical_release (solver);
 }
 
 int main (int argc, char **argv) {

@@ -117,7 +117,7 @@ static FILE *write_to_file (const char *path) {
 static void fuzz (uint64_t rng) {
   unsigned vars = pick (&rng, 10, 100);
   double ratio = pick (&rng, 350, 450);
-  unsigned clauses = vars * ratio / 1000;
+  unsigned clauses = vars * ratio / 100.0;
   unsigned calls = pick (&rng, 1, 10);
   if (!quiet)
     printf (" %u %u %u", vars, clauses, calls), fflush (stdout);
@@ -185,7 +185,8 @@ int main (int argc, char **argv) {
     else
       repeat = true;
   }
-  msg ("IDrup Fuzzer Version 0.0 using %s", ccadical_signature ());
+  msg ("IDrup Fuzzer Version 0.0");
+  msg ("using %s", ccadical_signature ());
   if (seeded)
     msg ("user specified seed %" PRIu64, rng);
   else {

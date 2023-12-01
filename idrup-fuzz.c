@@ -7,6 +7,7 @@ static const char * usage =
 "  -h | --help          print this command line option summary\n"
 "  -q | --quiet         be quiet and do not print any messages\n"
 "  -n | --no-terminal   assume stdout is not connected to a terminal\n"
+"  -c | --continue      continue going even if test failed\n"
 "\n"
 "and '<number> one of these\n"
 "\n"
@@ -85,6 +86,7 @@ static void die (const char *fmt, ...) {
 
 static bool quiet;
 static bool terminal;
+static bool keep_going;
 
 static void clear_to_end_of_line (void) {
   if (!quiet && terminal)
@@ -172,7 +174,8 @@ static FILE *write_to_file (const char *path) {
   return file;
 }
 
-static void fuzz (uint64_t rng) {
+static void fuzz (uint64_t seed) {
+  uint64_t rng = seed;
   unsigned vars = pick (&rng, 10, 100);
   double ratio = pick (&rng, 3500, 4500);
   unsigned clauses = vars * ratio / 1000.0;
@@ -267,30 +270,36 @@ static void fuzz (uint64_t rng) {
 
   int res = system (CMD REDIRECT);
   if (res) {
-    if (!quiet) {
+    if (quiet)
+      printf ("%020" PRIu64 " %" PRIu64 " %u %u %u FAILED\n", seed, fuzzed,
+              vars, clauses, calls);
+    else {
       clear_to_end_of_line ();
-      fputs (" FAILED\n", stdout), fflush (stdout);
+      fputs (" FAILED\n", stdout);
     }
-    fputs (CMD, stdout);
-    fputc ('\n', stdout);
-    fflush (stdout);
-    {
-      FILE *file = fopen (LOG, "r");
-      int ch;
-      while ((ch = getc (file)) != EOF)
-        fputc (ch, stdout);
-      fclose (file);
+    if (!keep_going) {
       fflush (stdout);
+      fputs (CMD, stdout);
+      fputc ('\n', stdout);
+      fflush (stdout);
+      {
+        FILE *file = fopen (LOG, "r");
+        int ch;
+        while ((ch = getc (file)) != EOF)
+          fputc (ch, stdout);
+        fclose (file);
+        fflush (stdout);
+      }
+      {
+        FILE *file = fopen (ERR, "r");
+        int ch;
+        while ((ch = getc (file)) != EOF)
+          fputc (ch, stderr);
+        fclose (file);
+        fflush (stderr);
+      }
+      exit (1);
     }
-    {
-      FILE *file = fopen (ERR, "r");
-      int ch;
-      while ((ch = getc (file)) != EOF)
-        fputc (ch, stderr);
-      fclose (file);
-      fflush (stderr);
-    }
-    exit (1);
   } else if (!quiet)
     fputs (" checked", stdout), fflush (stdout);
 }
@@ -308,6 +317,8 @@ int main (int argc, char **argv) {
       quiet = true;
     else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-terminal"))
       terminal = false;
+    else if (!strcmp (arg, "-c") || !strcmp (arg, "--continue"))
+      keep_going = true;
     else if (arg[0] == '-') {
       uint64_t tmp;
       if (!parse_uint64_t (arg + 1, &tmp))

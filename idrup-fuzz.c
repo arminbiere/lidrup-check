@@ -202,6 +202,16 @@ static void fuzz (uint64_t rng) {
       ccadical_add (solver, 0);
       fputs (" 0\n", icnf);
     }
+    fputs ("q 0\n", icnf), fflush (icnf);
+    int res = ccadical_solve (solver);
+    if (res == 10) {
+      fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
+      fputs ("v 0\n", icnf), fflush (icnf);
+    } else {
+      assert (res == 20);
+      fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
+      fputs ("j 0\n", icnf), fflush (icnf);
+    }
   }
   fclose (icnf);
   if (!quiet)

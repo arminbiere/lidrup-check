@@ -557,6 +557,7 @@ static size_t allocated;
 
 static struct clauses *matrix;
 static signed char *values;
+static signed char *marks;
 static unsigned *levels;
 static bool *imported;
 
@@ -568,6 +569,7 @@ static struct {
 static bool failed;
 static bool inconsistent;
 static struct clauses empty_clauses;
+static struct clauses deleted_input_clauses;
 
 static void import_literal (int lit) {
   assert (lit);
@@ -605,6 +607,16 @@ static void import_literal (int lit) {
       values -= allocated;
       free (values);
       values = new_values;
+
+      signed char *new_marks =
+          calloc (2 * new_allocated, sizeof *new_marks);
+      new_marks += new_allocated;
+      if (max_var)
+        for (int lit = -max_var; lit <= max_var; lit++)
+          new_marks[lit] = marks[lit];
+      marks -= allocated;
+      free (marks);
+      marks = new_marks;
 
       unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
       for (int idx = 1; idx <= max_var; idx++)
@@ -1063,9 +1075,150 @@ static void free_clause (struct clause *c) {
   free (c);
 }
 
-static struct clause *find_clause (bool active) {
-  debug ("finding clause");
-  return 0;
+static void mark_literal (int lit) {
+  debug ("marking %s", debug_literal (lit));
+  marks[lit] = 1;
+}
+
+static void mark_literals (const int *lits, size_t size) {
+  const int *const end = lits + size;
+  for (const int *p = lits; p != end; p++)
+    mark_literal (*p);
+}
+
+static void unmark_literal (int lit) {
+  debug ("unmarking %s", debug_literal (lit));
+  marks[lit] = 0;
+}
+
+static void unmark_literals (const int *lits, size_t size) {
+  const int *const end = lits + size;
+  for (const int *p = lits; p != end; p++)
+    unmark_literal (*p);
+}
+
+static struct clause *find_active_clause () {
+  debug ("finding active clause");
+  const int *lits = line.begin;
+  const int *const end_lits = line.end;
+  const size_t size = end_lits - lits;
+  mark_literals (lits, size);
+  struct clause *res = 0, *inactive = 0;
+  for (const int *p = lits; p != end_lits; p++) {
+    const int lit = *p;
+    struct clauses *watches = matrix + lit;
+    for (all_pointers (struct clause, c, *watches)) {
+      if (c->size != size)
+        continue;
+      for (all_literals (other, c))
+        if (!marks[other])
+          goto CONTINUE_WITH_NEXT_CLAUSE;
+      if (!c->active) {
+        if (!inactive)
+          inactive = c;
+        goto CONTINUE_WITH_NEXT_CLAUSE;
+      }
+      res = c;
+      debug_clause (c, "found matching active");
+      goto FOUND_CLAUSE;
+    CONTINUE_WITH_NEXT_CLAUSE:;
+    }
+  }
+FOUND_CLAUSE:
+  unmark_literals (lits, size);
+  if (!res) {
+    if (inactive)
+      check_error ("only inactive matching clause found");
+    else
+      check_error ("no active matching clause found");
+  }
+  return res;
+}
+
+static struct clause *find_inactive_input_clause () {
+  debug ("finding inactive clause");
+  const int *lits = line.begin;
+  const int *const end_lits = line.end;
+  const size_t size = end_lits - lits;
+  mark_literals (lits, size);
+  struct clause *res = 0, *active = 0;
+  for (const int *p = lits; p != end_lits; p++) {
+    const int lit = *p;
+    struct clauses *watches = matrix + lit;
+    for (all_pointers (struct clause, c, *watches)) {
+      if (c->size != size)
+        continue;
+      for (all_literals (other, c))
+        if (!marks[other])
+          goto CONTINUE_WITH_NEXT_CLAUSE;
+      if (c->active) {
+        if (!active)
+          active = c;
+        goto CONTINUE_WITH_NEXT_CLAUSE;
+      }
+      res = c;
+      assert (c->input);
+      debug_clause (c, "found matching inactive");
+      goto FOUND_CLAUSE;
+    CONTINUE_WITH_NEXT_CLAUSE:;
+    }
+  }
+FOUND_CLAUSE:
+  unmark_literals (lits, size);
+  if (!res) {
+    if (active)
+      check_error ("only active matching clause found");
+    else
+      check_error ("no inactive matching clause found");
+  }
+  return res;
+}
+
+static struct clause *find_active_input_clause () {
+  debug ("finding active input clause");
+  const int *lits = line.begin;
+  const int *const end_lits = line.end;
+  const size_t size = end_lits - lits;
+  mark_literals (lits, size);
+  struct clause *res = 0, *inactive = 0, *non_input = 0;
+  for (const int *p = lits; p != end_lits; p++) {
+    const int lit = *p;
+    struct clauses *watches = matrix + lit;
+    for (all_pointers (struct clause, c, *watches)) {
+      if (c->size != size)
+        continue;
+      for (all_literals (other, c))
+        if (!marks[other])
+          goto CONTINUE_WITH_NEXT_CLAUSE;
+      if (!c->active) {
+        if (!inactive)
+          inactive = c;
+        goto CONTINUE_WITH_NEXT_CLAUSE;
+      }
+      if (!c->input) {
+	if (!non_input)
+	  non_input = c;
+	goto CONTINUE_WITH_NEXT_CLAUSE;
+      }
+      res = c;
+      debug_clause (c, "found matching active");
+      goto FOUND_CLAUSE;
+    CONTINUE_WITH_NEXT_CLAUSE:;
+    }
+  }
+FOUND_CLAUSE:
+  unmark_literals (lits, size);
+  if (!res) {
+    if (inactive && non_input)
+      check_error ("only inactive and non-input matching clause found");
+    else if (inactive)
+      check_error ("only inactive matching clause found");
+    else if (non_input)
+      check_error ("only non-input matching clause found");
+    else
+      check_error ("no active matching clause found");
+  }
+  return res;
 }
 
 static void delete_clause (struct clause *c) {
@@ -1073,13 +1226,22 @@ static void delete_clause (struct clause *c) {
     check_error ("clause weakened at line %zu and not restored", c->lineno);
   debug ("deleting clause");
   unwatch_clause (c);
-  free_clause (c);
+  if (c->input) {
+    debug_clause (c, "saving deleted");
+    PUSH (deleted_input_clauses, c);
+  } else
+    free_clause (c);
+  statistics.deleted++;
 }
 
-static void weaken_clause (struct clause *) { debug ("weakening clause"); }
+static void weaken_clause (struct clause *) {
+  debug ("weakening clause");
+  statistics.weakened++;
+}
 
 static void restore_clause (struct clause *c) {
   debug ("restoring clause");
+  statistics.restored++;
 }
 
 static void check_model (void) {
@@ -1117,21 +1279,21 @@ static void import_check_add_lemma (void) {
 
 static void imported_find_delete_clause (void) {
   literals_imported ();
-  struct clause *c = find_clause (true);
+  struct clause *c = find_active_clause ();
   delete_clause (c);
   statistics.deleted++;
 }
 
 static void imported_find_restore_clause (void) {
   literals_imported ();
-  struct clause *c = find_clause (false);
+  struct clause *c = find_inactive_input_clause ();
   restore_clause (c);
   statistics.restored++;
 }
 
 static void imported_find_weaken_clause (void) {
   literals_imported ();
-  struct clause *c = find_clause (true);
+  struct clause *c = find_active_input_clause ();
   weaken_clause (c);
   statistics.weakened++;
 }
@@ -1456,6 +1618,12 @@ static void release_empty_clauses (void) {
   RELEASE (empty_clauses);
 }
 
+static void release_deleted_input_clauses (void) {
+  for (all_pointers (struct clause, c, deleted_input_clauses))
+    free_clause (c);
+  RELEASE (deleted_input_clauses);
+}
+
 static void release (void) {
   RELEASE (line);
   RELEASE (saved);
@@ -1463,11 +1631,14 @@ static void release (void) {
   if (max_var)
     release_watches ();
   release_empty_clauses ();
+  release_deleted_input_clauses ();
   RELEASE (trail);
   matrix -= allocated;
   free (matrix);
   values -= allocated;
   free (values);
+  marks -= allocated;
+  free (marks);
   free (imported);
   free (levels);
 }

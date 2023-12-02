@@ -1171,9 +1171,33 @@ static int parse_and_check (void) {
 
   {
     STATE (INTERACTION_HEADER);
-    goto
+    if (mode == pedantic) {
+      set_file (interactions);
+      int type = next_line ('p');
+      if (type == 'p' && match_header (ICNF))
+        goto PROOF_HEADER;
+      else {
+	unexpected_line (type, "in pedantic mode 'p icnf' header");
+	goto UNREACHABLE;
+      }
+    }
+    else
+      goto PROOF_HEADER;
   }
-  { STATE (INTERACTION_HEADER); }
+  {
+    STATE (PROOF_HEADER);
+    if (mode == pedantic) {
+      set_file (proof);
+      int type = next_line ('p');
+      if (type == 'p' && match_header (IDRUP))
+        goto INTERACTION_INPUT;
+      else {
+	unexpected_line (type, "in pedantic mode 'p idrup' header");
+	goto UNREACHABLE;
+      }
+    } else
+      goto INTERACTION_INPUT;
+  }
   {
     STATE (INTERACTION_INPUT);
     set_file (interactions);

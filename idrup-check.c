@@ -674,7 +674,10 @@ static void backtrack (unsigned new_level) {
     assert (values[lit] > 0);
     if (levels[abs (lit)] == new_level)
       break;
+#ifndef NDEBUG
+    level = levels[abs (lit)];
     debug ("unassigning %s", debug_literal (lit));
+#endif
     assert (values[lit] > 0);
     values[lit] = values[-lit] = 0;
     trail.end--;
@@ -746,8 +749,8 @@ static void add_clause (bool input) {
       unsigned level0 = levels[abs (lit0)];
       unsigned level1 = levels[abs (lit1)];
       if (level1)
-	if (val0 <= 0 || level0 > level1)
-	  backtrack (level1 - 1);
+        if (val0 <= 0 || level0 > level1)
+          backtrack (level1 - 1);
     }
     watch_clause (lit0, c);
     watch_clause (lit1, c);
@@ -795,26 +798,32 @@ static void add_clause (bool input) {
   }
 }
 
-static void reset_query (void) {
-  if (inconsistent || (!level && !failed)) {
-    debug ("no need to reset query");
-    return;
-  }
-  debug ("resetting query");
-  if (level)
+static void reset_assignment (void) {
+  if (level) {
+    debug ("resetting assignment");
     backtrack (0);
+  } else
+    debug ("no need to reset assignment");
+}
+
+static void reset_failed (void) {
   if (failed) {
     debug ("resetting failed");
     failed = false;
-  }
+  } else
+    debug ("no need to reset failed");
+}
+
+static void reset_checker (void) {
+  reset_assignment ();
+  reset_failed ();
 }
 
 static void save_query (void) {
   debug ("saving query");
   COPY (int, query, line);
   statistics.queries++;
-  assert (!failed);
-  assert (!level);
+  reset_checker ();
 }
 
 static void assign_propagated (int lit, struct clause *c) {
@@ -987,14 +996,14 @@ static void check_model (void) {
   debug ("checking model");
   statistics.conclusions++;
   statistics.models++;
-  reset_query ();
+  reset_checker ();
 }
 
 static void justify_core (void) {
   debug ("justifying core");
   statistics.conclusions++;
   statistics.justifications++;
-  reset_query ();
+  reset_checker ();
 }
 
 static void consistent_line (void) { debug ("checking consistency"); }

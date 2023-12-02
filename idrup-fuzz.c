@@ -174,6 +174,20 @@ static FILE *write_to_file (const char *path) {
   return file;
 }
 
+static void pick_literals (uint64_t *rng, int *lits, unsigned size,
+                           unsigned vars) {
+  for (unsigned j = 0; j != size; j++) {
+  RESTART:
+    int idx = pick (rng, 1, vars);
+    for (unsigned l = 0; l != j; l++)
+      if (abs (lits[l]) == idx)
+        goto RESTART;
+    int sign = pick (rng, 0, 1) ? -1 : 1;
+    int lit = sign * idx;
+    lits[j] = lit;
+  }
+}
+
 static void fuzz (uint64_t seed) {
   uint64_t rng = seed;
   unsigned vars = pick (&rng, 10, 100);
@@ -215,24 +229,28 @@ static void fuzz (uint64_t seed) {
         k = 3;
       assert (k <= vars);
       int clause[k];
+      pick_literals (&rng, clause, k, vars);
       fputc ('i', icnf);
       for (unsigned j = 0; j != k; j++) {
-      RESTART:
-        int idx = pick (&rng, 1, vars);
-        for (unsigned l = 0; l != j; l++)
-          if (abs (clause[l]) == idx)
-            goto RESTART;
-        int sign = pick (&rng, 0, 1) ? -1 : 1;
-        int lit = sign * idx;
-        clause[j] = lit;
+        int lit = clause[j];
         ccadical_add (solver, lit);
         fprintf (icnf, " %d", lit);
       }
       ccadical_add (solver, 0);
       fputs (" 0\n", icnf);
     }
-    // TODO put assumptions here.
-    fputs ("q 0\n", icnf), fflush (icnf);
+    unsigned k = pick (&rng, 0, 10);
+    if (!quiet)
+      printf ("/%u", k), fflush (stdout);
+    int query[k];
+    fputc ('q', icnf);
+    pick_literals (&rng, query, k, vars);
+    for (unsigned j = 0; j != k; j++) {
+      int lit = query[j];
+      ccadical_assume (solver, lit);
+      fprintf (icnf, " %d", lit);
+    }
+    fputs (" 0\n", icnf), fflush (icnf);
     int res = ccadical_solve (solver);
     bool concluded = false;
     if (res == 10) {
@@ -247,15 +265,19 @@ static void fuzz (uint64_t seed) {
         fprintf (icnf, " %d", val);
         concluded = true;
       }
-      fputs (" 0\n", icnf);
-      fflush (icnf);
     } else {
       assert (res == 20);
       fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
-      // TODO print core.
-      fputs ("j 0\n", icnf), fflush (icnf);
-      // concluded = true;
+      fputc ('j', icnf);
+      for (unsigned j = 0; j != k; j++) {
+	int lit = query[j];
+	if (ccadical_failed (solver, lit))
+	  fprintf (icnf, " %d", -lit);
+	concluded = true;
+      }
     }
+    fputs (" 0\n", icnf);
+    fflush (icnf);
     if (!concluded)
       ccadical_conclude (solver);
   }
@@ -271,7 +293,6 @@ static void fuzz (uint64_t seed) {
 #define CMD "./idrup-check -v " ICNF " " IDRUP
 
   int res = system (CMD REDIRECT);
-  res = 0;
   if (res) {
     if (quiet)
       printf ("%020" PRIu64 " %" PRIu64 " %u %u %u FAILED\n", seed, fuzzed,

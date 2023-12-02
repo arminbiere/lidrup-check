@@ -59,6 +59,16 @@ static void die (const char *fmt, ...) {
 static void out_of_memory (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
 
+static void fatal_error (const char *fmt, ...) {
+  fputs ("idrup-check: fatal internal error: ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
+}
+
 static void out_of_memory (const char *fmt, ...) {
   fputs ("idrup-check: error: out-of-memory ", stderr);
   va_list ap;
@@ -157,7 +167,7 @@ struct ints {
 struct file {
   FILE *file;
   const char *name;
-  size_t lineno, charno;
+  size_t lines, lineno, charno;
   size_t start_of_line;
   size_t end_buffer;
   size_t size_buffer;
@@ -176,11 +186,9 @@ static struct ints query;
 
 static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
-static const char *status;
-
 static const char *const ICNF = "icnf";
-// static const char * const CNF = "cnf"; // TODO
-static const char *cnf_file_type;
+static const char *const IDRUP = "idrup";
+static const char *string;
 
 static inline void set_file (struct file *new_file) {
   assert (new_file);
@@ -284,13 +292,13 @@ static void debug_print_parsed_line (int type) {
   switch (type) {
   case 'p':
     fputs ("p ", stdout);
-    assert (cnf_file_type);
-    fputs (cnf_file_type, stdout);
+    assert (string);
+    fputs (string, stdout);
     break;
   case 's':
     fputs ("s ", stdout);
-    assert (status);
-    fputs (status, stdout);
+    assert (string);
+    fputs (string, stdout);
     break;
   case 0:
     fputs ("<end-of-file>", stdout);
@@ -331,45 +339,61 @@ static int next_char (void) {
 static int ISDIGIT (int ch) { return '0' <= ch && ch <= '9'; }
 
 static int next_line_without_printing (char default_type) {
-  int actual_type = 0;
-  CLEAR (line);
-  file->start_of_line = file->lineno;
+
   int ch;
-RESTART:
-  while ((ch = next_char ()) == 'c') {
-    while ((ch = next_char ()) != '\n')
-      if (ch == EOF)
-        parse_error ("end-of-file in comment");
+  for (;;) {
+    file->start_of_line = file->lineno;
+    ch = next_char ();
+    if (ch == 'c') {
+      while ((ch = next_char ()) != '\n')
+        if (ch == EOF)
+          parse_error ("end-of-file in comment");
 #ifndef NDEBUG
-    if (verbosity == INT_MAX)
-      message ("skipped line %zu in '%s': c...", file->start_of_line + 1,
+      if (verbosity == INT_MAX)
+        message ("skipped line %zu in '%s': c...", file->start_of_line + 1,
+                 file->name);
+#endif
+    } else if (ch == EOF) {
+#ifndef NDEBUG
+      if (verbosity == INT_MAX)
+        message ("parsed end-of-file in '%s' after %zu lines", file->name,
+                 file->lineno);
+#endif
+      return 0;
+    } else if (ch == '\n') {
+      message ("skipping empty line %zu in '%s'", file->start_of_line + 1,
                file->name);
-#endif
+    } else
+      break;
   }
-  if (ch == EOF) {
-#ifndef NDEBUG
-    if (verbosity == INT_MAX)
-      message ("parsed end-of-file in '%s' after %zu lines", file->name,
-               file->lineno);
-#endif
-    return 0;
-  }
-  if (ch == '\n') {
-    message ("skipping empty line %zu in '%s'", file->start_of_line + 1,
-             file->name);
-    goto RESTART;
-  }
+
+  int actual_type = 0;
+  string = 0;
+
+  CLEAR (line);
+  file->lines++;
 
   if (ch == 'p') {
-    for (const char *p = " icnf"; *p; p++)
-      if (next_char () != *p)
-        parse_error ("invalid 'p' header line");
-    if (next_char () != '\n')
-      parse_error ("expected new line after 'p icnf' header");
-    cnf_file_type = ICNF;
+    if (next_char () != ' ')
+    INVALID_HEADER_LINE:
+      parse_error ("invalid 'p' header line");
+
+    if (next_char () != 'i')
+      goto INVALID_HEADER_LINE;
 
     // TODO parse 'p cnf <vars> <clauses>' header too.
-    // TODO parse 'p idrup' header?
+
+    ch = next_char ();
+    if (ch == 'c' && next_char () == 'n' && next_char () == 'f')
+      string = ICNF;
+    else if (ch == 'd' && next_char () == 'r' && next_char () == 'u' &&
+             next_char () == 'p')
+      string = IDRUP;
+    else
+      goto INVALID_HEADER_LINE;
+
+    if (next_char () != '\n')
+      parse_error ("expected new line after 'p icnf' header");
 
     return 'p';
   }
@@ -395,14 +419,14 @@ RESTART:
       if (next_char () != '\n')
       EXPECTED_NEW_LINE_AFTER_STATUS:
         parse_error ("expected new-line after status");
-      status = SATISFIABLE;
+      string = SATISFIABLE;
     } else if (ch == 'U') {
       for (const char *p = "NSATISFIABLE"; *p; p++)
         if (*p != next_char ())
           goto INVALID_STATUS_LINE;
       if (next_char () != '\n')
         goto EXPECTED_NEW_LINE_AFTER_STATUS;
-      status = UNSATISFIABLE;
+      string = UNSATISFIABLE;
     } else
       goto INVALID_STATUS_LINE;
     return 's';
@@ -1084,6 +1108,18 @@ static void save_line (void) {
   COPY (int, saved, line);
 }
 
+static bool match_header (const char *expected) {
+  if (file->lines > 1)
+    return false;
+  assert (file->lines == 1);
+  if (string != expected)
+    parse_error ("expected '%s' header and not 'p %s' "
+                 "(input files swapped?)",
+                 expected, string);
+  verbose ("found '%s' header in '%s'", string, file->name);
+  return true;
+}
+
 #ifndef NDEBUG
 
 static void debug_state (const char *name) {
@@ -1096,59 +1132,64 @@ static void debug_state (const char *name) {
   fflush (stdout);
 }
 
-#define STATE(NAME) \
-  goto NAME; \
-  NAME: \
-  debug_state (#NAME)
 #else
-#define STATE(NAME) \
-  goto NAME; \
-  NAME:
+#define debug_state(...) \
+  do { \
+  } while (false)
 #endif
+
+#define STATE(NAME) \
+  goto UNREACHABLE;   /* Make sure that there are no fall-throughs! */ \
+  NAME:               /* This is the actual state label. */ \
+  debug_state (#NAME) /* And print entering state during logging */
 
 static int parse_and_check_in_pedantic_mode (void) {
   verbose ("starting interactions and proof checking in strict mode");
-  {
-    STATE (INTERACTION_HEADER);
-    set_file (interactions);
-    int type = next_line (0);
-    if (type != 'p')
-      unexpected_line (type, "'p'");
-    goto INTERACTION_INPUT;
-  }
+  goto INTERACTION_INPUT; // Avoid 'INTERACTION_INPUT' not-used warning.
   {
     STATE (INTERACTION_INPUT);
     set_file (interactions);
     int type = next_line ('i');
-    switch (type) {
-    case 'i':
+    if (type == 'i') {
       import_add_input ();
       save_line ();
       goto PROOF_INPUT;
-    case 'q':
+    } else if (type == 'q') {
       save_line ();
       goto PROOF_QUERY;
-    case 0:
-      verbose ("finished interactions and proof checking in strict mode");
-      return 0;
-    default:
+    } else if (type == 0)
+      goto END_OF_CHECKING;
+    else if (type == 'p') {
+      if (match_header (ICNF))
+        goto INTERACTION_INPUT;
+      else
+        goto INTERACTION_INPUT_UNEXPECTED_LINE;
+    } else {
+    INTERACTION_INPUT_UNEXPECTED_LINE:
       unexpected_line (type, "'i' or 'q'");
+      goto UNREACHABLE;
     }
-    goto PROOF_INPUT;
   }
   {
     STATE (PROOF_INPUT);
     set_file (proof);
     int type = next_line ('i');
-    if (type == 'i')
+    if (type == 'i') {
       match_saved ("input");
-    else if (!is_learn_delete_restore_or_weaken (type))
+      goto INTERACTION_INPUT;
+    } else if (type == 'p') {
+      if (match_header (IDRUP))
+        goto PROOF_INPUT;
+      else
+        goto PROOF_INPUT_UNEXPECTED_LINE;
+    } else if (!is_learn_delete_restore_or_weaken (type)) {
+    PROOF_INPUT_UNEXPECTED_LINE:
       unexpected_line (type, "'i', 'l', 'd', 'r' or 'w'");
-    else {
+      goto UNREACHABLE;
+    } else {
       learn_delete_restore_or_weaken (type);
       goto PROOF_INPUT;
     }
-    goto INTERACTION_INPUT;
   }
   {
     STATE (PROOF_QUERY);
@@ -1158,12 +1199,19 @@ static int parse_and_check_in_pedantic_mode (void) {
       match_saved ("query");
       save_query ();
       goto PROOF_CHECK;
-    }
-    if (!is_learn_delete_restore_or_weaken (type))
+    } else if (type == 'p') {
+      if (match_header (IDRUP))
+        goto PROOF_QUERY;
+      else
+        goto PROOF_QUERY_UNEXPECTED_LINE;
+    } else if (!is_learn_delete_restore_or_weaken (type)) {
+    PROOF_QUERY_UNEXPECTED_LINE:
       unexpected_line (type, "'q', 'l', 'd', 'r' or 'w'");
-    else
+      goto UNREACHABLE;
+    } else {
       learn_delete_restore_or_weaken (type);
-    goto PROOF_QUERY;
+      goto PROOF_QUERY;
+    }
   }
   {
     STATE (PROOF_CHECK);
@@ -1172,9 +1220,10 @@ static int parse_and_check_in_pedantic_mode (void) {
     if (is_learn_delete_restore_or_weaken (type)) {
       learn_delete_restore_or_weaken (type);
       goto PROOF_CHECK;
-    } else if (type != 's')
+    } else if (type != 's') {
       unexpected_line (type, "'s', 'l', 'd', 'r' or 'w'");
-    else if (status == SATISFIABLE)
+      goto UNREACHABLE;
+    } else if (string == SATISFIABLE)
       goto INTERACTION_SATISFIABLE;
     else
       goto INTERACTION_UNSATISFIABLE;
@@ -1183,66 +1232,95 @@ static int parse_and_check_in_pedantic_mode (void) {
     STATE (INTERACTION_SATISFIABLE);
     set_file (interactions);
     int type = next_line (0);
-    if (type != 's')
-      unexpected_line (type, "'s'");
-    if (status != SATISFIABLE)
+    if (type == 's' && string == SATISFIABLE)
+      goto INTERACTION_SATISFIED;
+    else if (type == 's') {
       type_error ("unexpected 's %s' line (expected 's SATISFIABLE')",
-                  status);
-    goto INTERACTION_SATISFIED;
+                  string);
+      goto UNREACHABLE;
+    } else {
+      unexpected_line (type, "'s SATISFIABLE'");
+      goto UNREACHABLE;
+    }
   }
   {
     STATE (INTERACTION_UNSATISFIABLE);
     set_file (interactions);
     int type = next_line (0);
-    if (type != 's')
-      unexpected_line (type, "'s'");
-    if (status != UNSATISFIABLE)
+    if (type == 's' && string == UNSATISFIABLE)
+      goto INTERACTION_UNSATISFIED;
+    else if (type == 's') {
       type_error ("unexpected 's %s' line (expected 's UNSATISFIABLE')",
-                  status);
-    goto INTERACTION_UNSATISFIED;
-    ;
+                  string);
+      goto UNREACHABLE;
+    } else {
+      unexpected_line (type, "'s UNSATISFIABLE'");
+      goto UNREACHABLE;
+    }
   }
   {
     STATE (INTERACTION_SATISFIED);
     set_file (interactions);
     int type = next_line (0);
-    if (type != 'v')
+    if (type == 'v') {
+      consistent_line ();
+      save_line ();
+      goto PROOF_VALUES;
+    } else {
       unexpected_line (type, "'v'");
-    consistent_line ();
-    save_line ();
-    goto PROOF_VALUES;
+      goto UNREACHABLE;
+    }
   }
   {
     STATE (PROOF_VALUES);
     set_file (proof);
     int type = next_line (0);
-    if (type != 'v')
+    if (type == 'v') {
+      consistent_line ();
+      superset_saved ();
+      check_model ();
+      goto INTERACTION_INPUT;
+    } else {
       unexpected_line (type, "'v'");
-    consistent_line ();
-    superset_saved ();
-    check_model ();
-    goto INTERACTION_INPUT;
+      goto UNREACHABLE;
+    }
   }
   {
     STATE (INTERACTION_UNSATISFIED);
     set_file (interactions);
     int type = next_line (0);
-    if (type != 'j')
+    if (type == 'j') {
+      consistent_line ();
+      save_line ();
+      goto PROOF_JUSTIFY;
+    } else {
       unexpected_line (type, "'j'");
-    consistent_line ();
-    save_line ();
-    goto PROOF_JUSTIFY;
+      goto UNREACHABLE;
+    }
   }
   {
     STATE (PROOF_JUSTIFY);
     set_file (proof);
     int type = next_line (0);
-    if (type != 'j')
+    if (type == 'j') {
+      consistent_line ();
+      subset_saved ();
+      justify_core ();
+      goto INTERACTION_INPUT;
+    } else {
       unexpected_line (type, "'j'");
-    consistent_line ();
-    subset_saved ();
-    justify_core ();
-    goto INTERACTION_INPUT;
+      goto UNREACHABLE;
+    }
+  }
+  {
+    STATE (END_OF_CHECKING);
+    verbose ("succesfully reached end-of-checking");
+    return 0;
+  }
+  {
+    STATE (UNREACHABLE);
+    fatal_error ("invalid parser state reached");
+    return 0;
   }
 }
 

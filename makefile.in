@@ -17,4 +17,6 @@ format:
 	clang-format -i idrup-check.c
 test: all
 	./test/run.sh
+fuzz: idrup-check idrup-fuzz
+	./idrup-fuzz -1000
 .PHONY: all clean format pdf test

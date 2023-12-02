@@ -799,7 +799,7 @@ static void add_clause (bool input) {
 }
 
 static void reset_assignment (void) {
-  if (level) {
+  if (!inconsistent && level) {
     debug ("resetting assignment");
     backtrack (0);
   } else
@@ -807,7 +807,7 @@ static void reset_assignment (void) {
 }
 
 static void reset_failed (void) {
-  if (failed) {
+  if (!inconsistent && failed) {
     debug ("resetting failed");
     failed = false;
   } else

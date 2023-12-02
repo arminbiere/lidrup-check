@@ -8,6 +8,7 @@ static const char * usage =
 "  -q | --quiet         be quiet and do not print any messages\n"
 "  -n | --no-terminal   assume stdout is not connected to a terminal\n"
 "  -c | --continue      continue going even if test failed\n"
+"  -s | --small         restrict range of variables\n"
 "\n"
 "and '<number> one of these\n"
 "\n"
@@ -75,7 +76,7 @@ static void hash (uint64_t value, uint64_t *state) {
 }
 
 static void die (const char *fmt, ...) {
-  fputs ("idrup-check: error: ", stderr);
+  fputs ("idrup-fuzz: error: ", stderr);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -85,6 +86,8 @@ static void die (const char *fmt, ...) {
 }
 
 static bool quiet;
+static bool small = true;
+
 static bool terminal;
 static bool keep_going;
 
@@ -138,6 +141,7 @@ static volatile uint64_t fuzzed;
 static volatile uint64_t repetitions;
 static bool limited = false;
 
+static int min (int a, int b) { return a < b ? a : b; }
 static double average (double a, double b) { return b ? a / b : 0; }
 static double percent (double a, double b) { return average (100 * a, b); }
 
@@ -174,8 +178,9 @@ static FILE *write_to_file (const char *path) {
   return file;
 }
 
-static void pick_literals (uint64_t *rng, int *lits, unsigned size,
-                           unsigned vars) {
+static unsigned vars;
+
+static void pick_literals (uint64_t *rng, int *lits, unsigned size) {
   for (unsigned j = 0; j != size; j++) {
   RESTART:
     int idx = pick (rng, 1, vars);
@@ -190,10 +195,10 @@ static void pick_literals (uint64_t *rng, int *lits, unsigned size,
 
 static void fuzz (uint64_t seed) {
   uint64_t rng = seed;
-  unsigned vars = pick (&rng, 10, 100);
+  vars = pick (&rng, 3, small ? 10 : 100);
   double ratio = pick (&rng, 3500, 4500);
   unsigned clauses = vars * ratio / 1000.0;
-  unsigned calls = pick (&rng, 1, 10);
+  unsigned calls = pick (&rng, 1, small ? 3 : 10);
   if (!quiet)
     printf (" %u %u %u", vars, clauses, calls), fflush (stdout);
 #define PATH "/tmp/idrup-fuzz"
@@ -219,17 +224,17 @@ static void fuzz (uint64_t seed) {
         k = 1;
       else if (!pick (&rng, 0, clauses / 10))
         k = 2;
-      else if (!pick (&rng, 0, clauses / 10))
+      else if (vars >= 4 && !pick (&rng, 0, clauses / 10))
         k = 4;
-      else if (!pick (&rng, 0, clauses / 10))
+      else if (vars >= 5 && !pick (&rng, 0, clauses / 10))
         k = 5;
-      else if (!pick (&rng, 0, clauses / 10))
+      else if (vars >= 6 && !pick (&rng, 0, clauses / 10))
         k = 6;
       else
         k = 3;
       assert (k <= vars);
       int clause[k];
-      pick_literals (&rng, clause, k, vars);
+      pick_literals (&rng, clause, k);
       fputc ('i', icnf);
       for (unsigned j = 0; j != k; j++) {
         int lit = clause[j];
@@ -239,12 +244,12 @@ static void fuzz (uint64_t seed) {
       ccadical_add (solver, 0);
       fputs (" 0\n", icnf);
     }
-    unsigned k = pick (&rng, 0, 10);
+    unsigned k = pick (&rng, 0, min (10, vars));
     if (!quiet)
       printf ("/%u", k), fflush (stdout);
     int query[k];
     fputc ('q', icnf);
-    pick_literals (&rng, query, k, vars);
+    pick_literals (&rng, query, k);
     for (unsigned j = 0; j != k; j++) {
       int lit = query[j];
       ccadical_assume (solver, lit);
@@ -254,6 +259,8 @@ static void fuzz (uint64_t seed) {
     int res = ccadical_solve (solver);
     bool concluded = false;
     if (res == 10) {
+      if (!quiet)
+	fputc ('s', stdout), fflush (stdout);
       fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
       fputc ('v', icnf);
       unsigned values = pick (&rng, 0, vars);
@@ -266,6 +273,8 @@ static void fuzz (uint64_t seed) {
         concluded = true;
       }
     } else {
+      if (!quiet)
+	fputc ('u', stdout), fflush (stdout);
       assert (res == 20);
       fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
       fputc ('j', icnf);
@@ -278,7 +287,8 @@ static void fuzz (uint64_t seed) {
     }
     fputs (" 0\n", icnf);
     fflush (icnf);
-    if (!concluded)
+    (void) concluded;
+    // if (!concluded) // TODO could make this optional.
       ccadical_conclude (solver);
   }
   ccadical_release (solver);
@@ -343,6 +353,8 @@ int main (int argc, char **argv) {
       terminal = false;
     else if (!strcmp (arg, "-c") || !strcmp (arg, "--continue"))
       keep_going = true;
+    else if (!strcmp (arg, "-s") || !strcmp (arg, "--small"))
+      small = true;
     else if (arg[0] == '-') {
       uint64_t tmp;
       if (!parse_uint64_t (arg + 1, &tmp))

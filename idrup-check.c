@@ -30,6 +30,10 @@ static const char * idrup_check_usage =
 "  --strict    strict mode (requires 'v' and 'j' lines in proof only)\n"
 "  --relaxed   relaxed mode (missing 'v' and 'j' proof lines ignored)\n"
 "  --pedantic  pedantic mode (requires 'v' and 'j' in both files\n"
+"\n"
+"The defalt mode is strict checking which still allows headers to be\n"
+"skipped and conclusions ('v' and 'j' lines) to be optional in the\n"
+"interaction file while still being mandatory in the proof file.\n"
 ;
 
 // clang-format on
@@ -87,7 +91,7 @@ enum {
   pedantic = 1,
 };
 
-static int mode = pedantic;
+static int mode = strict;
 
 static void message (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
@@ -235,8 +239,9 @@ static void type_error (const char *, ...)
 
 static void type_error (const char *fmt, ...) {
   assert (file);
-  fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
-           file->start_of_line, file->name);
+  fprintf (stderr,
+           "idrup-check: error: at line %zu in '%s': ", file->start_of_line,
+           file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -251,8 +256,9 @@ static void line_error (int type, const char *, ...)
 static void line_error (int type, const char *fmt, ...) {
   assert (file);
   fflush (stdout);
-  fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
-           file->start_of_line, file->name);
+  fprintf (stderr,
+           "idrup-check: error: at line %zu in '%s': ", file->start_of_line,
+           file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -1145,9 +1151,29 @@ static void debug_state (const char *name) {
   NAME:               /* This is the actual state label. */ \
   debug_state (#NAME) /* And print entering state during logging */
 
-static int parse_and_check_in_pedantic_mode (void) {
+static int parse_and_check (void) {
+
+  // By default any parse error or failed check will abort the program with
+  // exit code '1' except in 'relaxed' parsing mode where parsing and
+  // checking continues even if model 'v ...' lines are missing after an 's
+  // SATISFIABLE' status line in the proof. Without having such a model the
+  // checker can not guarantee that the input clauses can be satisfied at
+  // this point.  For missing 'j' justification lines the checker might end
+  // up in a similar situation (in case the user claims a justification
+  // which however core is not implied by unit propagation).  In these cases
+  // the program continues without error but simply exit with exit code '2'
+  // to denote that only partial checking succeeded to which 'res' is set.
+
+  int res = 0;
+
   verbose ("starting interactions and proof checking in strict mode");
-  goto INTERACTION_INPUT; // Avoid 'INTERACTION_INPUT' not-used warning.
+  goto INTERACTION_HEADER; // Explicitly start with this state.
+
+  {
+    STATE (INTERACTION_HEADER);
+    goto
+  }
+  { STATE (INTERACTION_HEADER); }
   {
     STATE (INTERACTION_INPUT);
     set_file (interactions);
@@ -1317,23 +1343,13 @@ static int parse_and_check_in_pedantic_mode (void) {
   {
     STATE (END_OF_CHECKING);
     verbose ("succesfully reached end-of-checking");
-    return 0;
+    return res;
   }
   {
     STATE (UNREACHABLE);
     fatal_error ("invalid parser state reached");
-    return 0;
+    return 1;
   }
-}
-
-static int parse_and_check_in_strict_mode (void) {
-  die ("strict checking mode not implemented yet");
-  return 1;
-}
-
-static int parse_and_check_in_relaxed_mode (void) {
-  die ("relaxed checking mode not implemented yet");
-  return 1;
 }
 
 static void free_clause (struct clause *c) {
@@ -1551,13 +1567,7 @@ int main (int argc, char **argv) {
   for (int i = 0; i != 2; i++)
     files[i].lineno = 1;
 
-  int res;
-  if (mode == strict)
-    res = parse_and_check_in_strict_mode ();
-  else if (mode == pedantic)
-    res = parse_and_check_in_pedantic_mode ();
-  else
-    res = parse_and_check_in_relaxed_mode ();
+  int res = parse_and_check ();
 
   if (verbosity >= 0)
     fputs ("c\n", stdout);

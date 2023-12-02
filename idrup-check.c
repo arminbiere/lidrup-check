@@ -170,29 +170,44 @@ struct ints {
 
 struct file {
   FILE *file;
-  const char *name;
-  size_t lines, lineno, charno;
-  size_t start_of_line;
-  size_t end_buffer;
-  size_t size_buffer;
-  bool end_of_file;
-  char last_char;
-  char buffer[1u << 20];
+  const char *name;      // Actual path to this file.
+  size_t lines;          // Proof lines read from this file.
+  size_t lineno;         // Line number of lines parsed so far.
+  size_t charno;         // Number of bytes parsed.
+  size_t start_of_line;  // Line number of current proof line.
+  size_t end_buffer;     // End of remaining characters in buffer.
+  size_t size_buffer;    // Current position (bytes parsed) in buffer.
+  bool end_of_file;      // Buffer 'read-char' detected end-of-file.
+  char last_char;        // Last char used to bump 'lineno'.
+  char buffer[1u << 20]; // The actual buffer (1MB).
 };
 
+// Array of two files statically allocated and initialized.
+
 static struct file files[2] = {{.lineno = 1}, {.lineno = 1}};
+
+// The actual interaction and proof files point into this array.
+
 static struct file *interactions = files + 0;
 static struct file *proof = files + 1;
+
+// The current file from which we read (is set with 'set_file').
+
 static struct file *file;
 
-static struct ints line;
-static struct ints saved;
-static struct ints query;
+static struct ints line;  // Current line of integers parsed.
+static struct ints saved; // Saved line for checking.
+static struct ints query; // Saved query for checking.
+
+// Constant strings parsed in 'p' and 's' lines.
 
 static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
 static const char *const ICNF = "icnf";
 static const char *const IDRUP = "idrup";
+
+// The parser saves such strings here.
+
 static const char *string;
 
 static inline void set_file (struct file *new_file) {
@@ -234,10 +249,10 @@ static void parse_error (const char *fmt, ...) {
   exit (1);
 }
 
-static void type_error (const char *, ...)
+static void check_error (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
 
-static void type_error (const char *fmt, ...) {
+static void check_error (const char *fmt, ...) {
   assert (file);
   fprintf (stderr,
            "idrup-check: error: at line %zu in '%s': ", file->start_of_line,
@@ -492,9 +507,9 @@ static inline int next_line (char default_type) {
 
 static void unexpected_line (int type, const char *expected) {
   if (type)
-    type_error ("unexpected '%c' line (expected %s line)", type, expected);
+    parse_error ("unexpected '%c' line (expected %s line)", type, expected);
   else
-    type_error ("unexpected end-of-file (expected %s line)", expected);
+    parse_error ("unexpected end-of-file (expected %s line)", expected);
 }
 
 static struct {
@@ -515,8 +530,9 @@ static struct {
 
 struct clause {
 #ifndef NDEBUG
-  size_t id, lineno;
+  size_t id;
 #endif
+  size_t lineno;
   unsigned size;
   bool active;
   bool input;
@@ -692,9 +708,37 @@ static void assign_unit (int lit) {
   trail.units++;
 }
 
-static void watch_clause (int lit, struct clause *c) {
+static void watch_literal (int lit, struct clause *c) {
   debug_clause (c, "watching %s in", debug_literal (lit));
   PUSH (matrix[lit], c);
+}
+
+static void watch_clause (struct clause *c) {
+  for (unsigned i = 0; i != 2 && i != c->size; i++)
+    watch_literal (c->lits[i], c);
+}
+
+static void unwatch_literal (int lit, struct clause *c) {
+  debug_clause (c, "unwatching %s in", debug_literal (lit));
+  struct clauses *watches = matrix + lit;
+  struct clause **begin = watches->begin, **q = begin, **p = q;
+  struct clause **end = watches->end;
+  for (;;) {
+    assert (p != end);
+    struct clause *d = *p++;
+    if (c == d)
+      break;
+    *q++ = d;
+  }
+  assert (q + 1 == p);
+  while (p != end)
+    *q++ = *p++;
+  watches->end = q;
+}
+
+static void unwatch_clause (struct clause *c) {
+  for (unsigned i = 0; i != 2 && i != c->size; i++)
+    unwatch_literal (c->lits[i], c);
 }
 
 static void backtrack (unsigned new_level) {
@@ -732,9 +776,9 @@ static void add_clause (bool input) {
   assert (file);
   statistics.added++;
 #ifndef NDEBUG
-  c->lineno = file->start_of_line;
   c->id = statistics.added;
 #endif
+  c->lineno = file->start_of_line;
   c->size = size;
   c->active = true;
   c->input = input;
@@ -745,7 +789,7 @@ static void add_clause (bool input) {
   if (!size)
     PUSH (empty_clauses, c);
   else if (size == 1)
-    watch_clause (c->lits[0], c);
+    watch_literal (c->lits[0], c);
   else {
     int *lits = c->lits;
     for (size_t i = 0; i != 2; i++) {
@@ -770,22 +814,24 @@ static void add_clause (bool input) {
         }
       }
     }
-    int lit0 = lits[0], lit1 = lits[1];
-    debug ("watches %s and %s", debug_literal (lit0), debug_literal (lit1));
-    signed char val1 = values[lit1];
-    if (val1 >= 0)
-      debug ("second lower level watch not falsified");
-    else {
-      debug ("second lower level watch falsified");
-      signed char val0 = values[lit0];
-      unsigned level0 = levels[abs (lit0)];
-      unsigned level1 = levels[abs (lit1)];
-      if (level1)
-        if (val0 <= 0 || level0 > level1)
-          backtrack (level1 - 1);
+    {
+      int lit0 = lits[0], lit1 = lits[1];
+      debug ("watches %s and %s", debug_literal (lit0),
+             debug_literal (lit1));
+      signed char val1 = values[lit1];
+      if (val1 >= 0)
+        debug ("second lower level watch not falsified");
+      else {
+        debug ("second lower level watch falsified");
+        signed char val0 = values[lit0];
+        unsigned level0 = levels[abs (lit0)];
+        unsigned level1 = levels[abs (lit1)];
+        if (level1)
+          if (val0 <= 0 || level0 > level1)
+            backtrack (level1 - 1);
+      }
     }
-    watch_clause (lit0, c);
-    watch_clause (lit1, c);
+    watch_clause (c);
   }
 
   int unit = 0;
@@ -904,7 +950,7 @@ static bool propagate (void) {
         *r = not_lit;
         lits[0] = other_watch;
         lits[1] = replacement;
-        watch_clause (replacement, c);
+        watch_literal (replacement, c);
         q--;
       } else if (!other_watch_value)
         assign_propagated (other_watch, c);
@@ -1011,12 +1057,24 @@ IMPLICATION_CHECK_SUCCEEDED:
   debug ("implication check succeeded");
 }
 
+static void free_clause (struct clause *c) {
+  debug ("freeing clause at %p", (void *) c);
+  debug_clause (c, "free");
+  free (c);
+}
+
 static struct clause *find_clause (bool active) {
   debug ("finding clause");
   return 0;
 }
 
-static void delete_clause (struct clause *) { debug ("deleting clause"); }
+static void delete_clause (struct clause *c) {
+  if (!c->active)
+    check_error ("clause weakened at line %zu and not restored", c->lineno);
+  debug ("deleting clause");
+  unwatch_clause (c);
+  free_clause (c);
+}
 
 static void weaken_clause (struct clause *) { debug ("weakening clause"); }
 
@@ -1099,7 +1157,7 @@ static void match_saved (const char *type_str) {
   debug ("matching saved line");
   if (SIZE (line) != SIZE (saved))
   SAVED_LINE_DOES_NOT_MATCH:
-    type_error ("%s line does not match", type_str);
+    check_error ("%s line does not match", type_str);
   const int *const end = saved.end;
   const int *p = saved.begin;
   const int *q = line.begin;
@@ -1177,11 +1235,10 @@ static int parse_and_check (void) {
       if (type == 'p' && match_header (ICNF))
         goto PROOF_HEADER;
       else {
-	unexpected_line (type, "in pedantic mode 'p icnf' header");
-	goto UNREACHABLE;
+        unexpected_line (type, "in pedantic mode 'p icnf' header");
+        goto UNREACHABLE;
       }
-    }
-    else
+    } else
       goto PROOF_HEADER;
   }
   {
@@ -1192,8 +1249,8 @@ static int parse_and_check (void) {
       if (type == 'p' && match_header (IDRUP))
         goto INTERACTION_INPUT;
       else {
-	unexpected_line (type, "in pedantic mode 'p idrup' header");
-	goto UNREACHABLE;
+        unexpected_line (type, "in pedantic mode 'p idrup' header");
+        goto UNREACHABLE;
       }
     } else
       goto INTERACTION_INPUT;
@@ -1287,8 +1344,8 @@ static int parse_and_check (void) {
     if (type == 's' && string == SATISFIABLE)
       goto INTERACTION_SATISFIED;
     else if (type == 's') {
-      type_error ("unexpected 's %s' line (expected 's SATISFIABLE')",
-                  string);
+      parse_error ("unexpected 's %s' line (expected 's SATISFIABLE')",
+                   string);
       goto UNREACHABLE;
     } else {
       unexpected_line (type, "'s SATISFIABLE'");
@@ -1302,8 +1359,8 @@ static int parse_and_check (void) {
     if (type == 's' && string == UNSATISFIABLE)
       goto INTERACTION_UNSATISFIED;
     else if (type == 's') {
-      type_error ("unexpected 's %s' line (expected 's UNSATISFIABLE')",
-                  string);
+      parse_error ("unexpected 's %s' line (expected 's UNSATISFIABLE')",
+                   string);
       goto UNREACHABLE;
     } else {
       unexpected_line (type, "'s UNSATISFIABLE'");
@@ -1374,12 +1431,6 @@ static int parse_and_check (void) {
     fatal_error ("invalid parser state reached");
     return 1;
   }
-}
-
-static void free_clause (struct clause *c) {
-  debug ("freeing clause at %p", (void *) c);
-  debug_clause (c, "free");
-  free (c);
 }
 
 static void release_watches (void) {

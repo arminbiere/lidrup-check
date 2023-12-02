@@ -672,7 +672,7 @@ static void backtrack (unsigned new_level) {
   while (trail.end > trail.begin) {
     int lit = trail.end[-1];
     assert (values[lit] > 0);
-    if (levels[abs (lit)] == new_level)
+    if (levels[abs (lit)] <= new_level)
       break;
 #ifndef NDEBUG
     level = levels[abs (lit)];

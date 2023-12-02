@@ -171,11 +171,12 @@ struct file {
   size_t start_of_line;
   size_t end_buffer;
   size_t size_buffer;
-  int end_of_file;
+  bool end_of_file;
+  char last_char;
   char buffer[1u << 20];
 };
 
-static struct file files[2];
+static struct file files[2] = {{.lineno = 1}, {.lineno = 1}};
 static struct file *interactions = files + 0;
 static struct file *proof = files + 1;
 static struct file *file;
@@ -235,7 +236,7 @@ static void type_error (const char *, ...)
 static void type_error (const char *fmt, ...) {
   assert (file);
   fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
-           file->start_of_line + 1, file->name);
+           file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -251,7 +252,7 @@ static void line_error (int type, const char *fmt, ...) {
   assert (file);
   fflush (stdout);
   fprintf (stderr, "idrup-check: error: at line %zu in '%s': ",
-           file->start_of_line + 1, file->name);
+           file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -329,8 +330,9 @@ static int next_char (void) {
     if (res != '\n')
       parse_error ("expected new-line after carriage return");
   }
-  if (res == '\n')
+  if (file->last_char == '\n')
     file->lineno++;
+  file->last_char = res;
   if (res != EOF)
     file->charno++;
   return res;
@@ -342,15 +344,15 @@ static int next_line_without_printing (char default_type) {
 
   int ch;
   for (;;) {
-    file->start_of_line = file->lineno;
     ch = next_char ();
+    file->start_of_line = file->lineno;
     if (ch == 'c') {
       while ((ch = next_char ()) != '\n')
         if (ch == EOF)
           parse_error ("end-of-file in comment");
 #ifndef NDEBUG
       if (verbosity == INT_MAX)
-        message ("skipped line %zu in '%s': c...", file->start_of_line + 1,
+        message ("skipped line %zu in '%s': c...", file->start_of_line,
                  file->name);
 #endif
     } else if (ch == EOF) {
@@ -361,7 +363,7 @@ static int next_line_without_printing (char default_type) {
 #endif
       return 0;
     } else if (ch == '\n') {
-      message ("skipping empty line %zu in '%s'", file->start_of_line + 1,
+      message ("skipping empty line %zu in '%s'", file->start_of_line,
                file->name);
     } else
       break;
@@ -724,7 +726,7 @@ static void add_clause (bool input) {
   assert (file);
   statistics.added++;
 #ifndef NDEBUG
-  c->lineno = file->start_of_line + 1;
+  c->lineno = file->start_of_line;
   c->id = statistics.added;
 #endif
   c->size = size;
@@ -1545,6 +1547,9 @@ int main (int argc, char **argv) {
   message ("reading incremental CNF '%s'", files[0].name);
   message ("reading and checking incremental DRUP proof '%s'",
            files[1].name);
+
+  for (int i = 0; i != 2; i++)
+    files[i].lineno = 1;
 
   int res;
   if (mode == strict)

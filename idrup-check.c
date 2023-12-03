@@ -31,7 +31,7 @@ static const char * idrup_check_usage =
 "  --relaxed   relaxed mode (missing 'v' and 'j' proof lines ignored)\n"
 "  --pedantic  pedantic mode (requires 'v' and 'j' in both files\n"
 "\n"
-"The defalt mode is strict checking which still allows headers to be\n"
+"The default mode is strict checking which still allows headers to be\n"
 "skipped and conclusions ('v' and 'j' lines) to be optional in the\n"
 "interaction file while still being mandatory in the proof file.\n"
 ;
@@ -166,7 +166,7 @@ static struct { int **begin, **end; } control;
 static bool inconsistent; // Empty clause derived.
 static bool failed;       // Failed assumption found.
 
-// Need to store empty clauses and deleted input clauses on seperate stacks
+// Need to store empty clauses and deleted input clauses on separate stacks
 // as they are not watched but still needed.
 
 static struct clauses empty_clauses;
@@ -841,7 +841,7 @@ static void pop_trail (int *new_end) {
   trail.end = new_end;
   assert (trail.units <= new_end);
   if (new_end < trail.propagate) {
-    debug ("truncating propatated from %zu to %zu literals",
+    debug ("truncating propagated from %zu to %zu literals",
            trail.propagate - trail.begin, new_end - trail.begin);
     trail.propagate = new_end;
   }
@@ -921,7 +921,7 @@ static void assign_assumption (int lit) {
 
 /*------------------------------------------------------------------------*/
 
-// Unassining variables is only done during backtracking.
+// Variables are only unassigned during backtracking.
 
 static void backtrack (unsigned new_level) {
   assert (!inconsistent);
@@ -983,6 +983,10 @@ static void free_clause (struct clause *c) {
 
 /*------------------------------------------------------------------------*/
 
+// Watching is complex as we want ILB style clause addition when checking
+// and adding lemmas under assumptions.  Otherwise assumptions have to be be
+// repropagated with every learned clause.
+
 static void watch_literal (int lit, struct clause *c) {
   debug_clause (c, "watching %s in", debug_literal (lit));
   PUSH (matrix[lit], c);
@@ -1002,8 +1006,6 @@ static void unwatch_clause (struct clause *c) {
   } else
     REMOVE (struct clause *, empty_clauses, c);
 }
-
-/*------------------------------------------------------------------------*/
 
 static int move_best_watch_to_front (int *lits, const int *const end) {
   int watch = *lits;
@@ -1074,7 +1076,8 @@ static void watch_clause (struct clause *c) {
   }
 }
 
-static int simplify_clause (struct clause *c, bool *satisfied, bool *falsified) {
+static int simplify_clause (struct clause *c, bool *satisfied,
+                            bool *falsified) {
   int unit = 0;
   for (all_literals (lit, c)) {
     signed char value = values[lit];
@@ -1131,33 +1134,7 @@ static void add_clause (bool input) {
   }
 }
 
-static void reset_assignment (void) {
-  if (!inconsistent && level) {
-    debug ("resetting assignment");
-    backtrack (0);
-  } else
-    debug ("no need to reset assignment");
-}
-
-static void reset_failed (void) {
-  if (!inconsistent && failed) {
-    debug ("resetting failed");
-    failed = false;
-  } else
-    debug ("no need to reset failed");
-}
-
-static void reset_checker (void) {
-  reset_assignment ();
-  reset_failed ();
-}
-
-static void save_query (void) {
-  debug ("saving query");
-  COPY (int, query, line);
-  statistics.queries++;
-  reset_checker ();
-}
+/*------------------------------------------------------------------------*/
 
 static bool propagate (void) {
   assert (!inconsistent);
@@ -1198,12 +1175,19 @@ static bool propagate (void) {
         lits[1] = replacement;
         watch_literal (replacement, c);
         q--;
-      } else if (!other_watch_value)
-        assign_forced (other_watch, c);
-      else {
+      } else if (!other_watch_value) {
+        if (c->weakened)
+          debug_clause (c, "ignoring forcing");
+        else
+          assign_forced (other_watch, c);
+      } else {
         assert (other_watch_value < 0);
-        debug_clause (c, "conflict");
-        res = false;
+        if (c->weakened)
+          debug_clause (c, "ignoring conflict");
+        else {
+          res = false;
+          debug_clause (c, "conflict");
+        }
       }
     }
     while (p != watches_end)
@@ -1213,6 +1197,45 @@ static bool propagate (void) {
   return res;
 }
 
+/*------------------------------------------------------------------------*/
+
+// A new query starts a new context with potentially new assumptions and
+// thus we have to backtrack to the root-level and reset the failed flag.
+
+static void reset_assignment (void) {
+  if (!inconsistent && level) {
+    debug ("resetting assignment");
+    backtrack (0);
+  } else
+    debug ("no need to reset assignment");
+}
+
+static void reset_failed (void) {
+  if (!inconsistent && failed) {
+    debug ("resetting failed");
+    failed = false;
+  } else
+    debug ("no need to reset failed");
+}
+
+static void reset_checker (void) {
+  reset_assignment ();
+  reset_failed ();
+}
+
+static void save_query (void) {
+  debug ("saving query");
+  COPY (int, query, line);
+  statistics.queries++;
+  reset_checker ();
+}
+
+/*------------------------------------------------------------------------*/
+
+// This is the essential checking function which checks that added lemmas
+// are indeed reverse unit propagation (RUP) implied.  It is slightly more
+// complicated as it needs to care about units and assumptions.
+
 static void check_implied (void) {
 
   if (inconsistent) {
@@ -1221,19 +1244,24 @@ static void check_implied (void) {
   }
 
   if (failed) {
-    debug ("skipping implication check as query failed");
+    debug ("skipping implication check as query already failed");
     return;
   }
 
+  // First propagate all new units on decision level zero.
+
   if (trail.propagate < trail.units) {
+    assert (!level);
     if (level)
-      backtrack (0);
+      backtrack (0); // TODO unreachable?
     if (!propagate ()) {
       message ("root-level unit propagation yields conflict");
       inconsistent = true;
       return;
     }
   }
+
+  // Then care about assumptions.
 
   size_t size_query = SIZE (query);
 #ifndef NDEBUG
@@ -1243,7 +1271,6 @@ static void check_implied (void) {
     assert (values[assumption] > 0);
   }
 #endif
-
   assert (!failed);
   while (level < size_query) {
     int assumption = query.begin[level];
@@ -1262,6 +1289,10 @@ static void check_implied (void) {
     }
   }
 
+  // Finally after all root-level units have been propagated and all
+  // assumptions are assigned, assume the negation of all literals in the
+  // lemma as decision.
+
   debug ("checking lemma is implied");
   bool implied = false;
   for (all_elements (int, lit, line)) {
@@ -1276,14 +1307,25 @@ static void check_implied (void) {
     assign_decision (-lit);
   }
 
-  if (!implied && propagate ())
-    line_error ('l', "lemma not implied:"); // TODO test this!
+  // Finally propagate all the assumptions and decisions and if this
+  // propagation does not give a conflict produce an error message.
 
-  if (level > size_query)
+  if (!implied && propagate ())
+    line_error ('l', "lemma not implied:");
+
+  if (level > size_query) // TODO what about more ILB?
     backtrack (size_query);
+
 IMPLICATION_CHECK_SUCCEEDED:
+  assert (level <= size_query);
   debug ("implication check succeeded");
 }
+
+/*------------------------------------------------------------------------*/
+
+// Clauses are found by marking the literals in the line and then traversing
+// the watches of them to find all clause of the same size with all literals
+// marked and active (not weakened).  This could be sped
 
 static void mark_literal (int lit) {
   debug ("marking %s", debug_literal (lit));
@@ -1359,6 +1401,10 @@ static struct clause *find_weakened_clause (void) {
   return find_clause (true);
 }
 
+/*------------------------------------------------------------------------*/
+
+// This section has all the low-level checks.
+
 static void delete_clause (struct clause *c) {
   assert (!c->weakened);
   debug ("deleting clause");
@@ -1373,42 +1419,70 @@ static void delete_clause (struct clause *c) {
 
 static void weaken_clause (struct clause *c) {
   assert (!c->weakened);
-  debug_clause (c, "weakening clause");
+  debug_clause (c, "weakening");
+  c->weakened = true;
   statistics.weakened++;
 }
 
 static void restore_clause (struct clause *c) {
   assert (c->weakened);
-  debug_clause (c, "restoring clause");
+  debug_clause (c, "restoring");
+  c->weakened = false;
+
+  // TODO This could be optimized (only backtrack as much as necessary).
+
+  if (level) {
+    debug ("forcing backtracking after restoring clause");
+    backtrack (0);
+  }
+
+  // TODO This could be optimized too (only necessary literals
+  // repropagated).
+
+  if (trail.begin < trail.propagate) {
+    assert (!level);
+    debug ("forcing repropagation of all literals after restoring clause");
+    trail.propagate = trail.begin;
+  }
+
   statistics.restored++;
 }
 
 static void check_model (void) {
   debug ("checking model");
+  for (all_elements (int, lit, line)) {
+    if (marks[-lit])
+      line_error ('v', "invalid model contains both %d and %d", -lit, lit);
+    else if (marks[lit])
+      debug ("ignoring duplicated literal %s", debug_literal (lit));
+    else {
+      debug ("marking %s", debug_literal (lit));
+      marks[lit] = true;
+    }
+  }
+  unmark_line ();
   statistics.conclusions++;
   statistics.models++;
-  reset_checker ();
+  reset_checker (); // TODO needed?
 }
 
 static void justify_core (void) {
   debug ("justifying core");
   statistics.conclusions++;
   statistics.justifications++;
-  reset_checker ();
+  reset_checker (); // TODO needed?
 }
 
-static void consistent_line (void) { debug ("checking consistency"); }
+static void check_literal_imported (int type, int lit) {
+  int idx = abs (lit);
+  if (idx > max_var || !imported[idx])
+    line_error (type, "literal %d unused");
+}
 
-static void subset_saved (void) { debug ("checking subset saved"); }
-
-static void superset_saved (void) { debug ("checking superset saved"); }
-
-static void literal_imported (int lit) {}
-
-static void literals_imported (void) {
+static void check_literals_imported (int type) {
   debug ("checking literals imported");
   for (all_elements (int, lit, line))
-    literal_imported (lit);
+    literal_imported (type, lit);
 }
 
 /*------------------------------------------------------------------------*/
@@ -1428,31 +1502,31 @@ static void import_check_then_add_lemma (void) {
   statistics.lemmas++;
 }
 
-static void imported_find_then_delete_clause (void) {
-  literals_imported ();
+static void imported_find_then_delete_clause (int type) {
+  check_literals_imported ();
   struct clause *c = find_active_clause ();
   if (c)
     delete_clause (c);
   else
-    line_error ('d', "could not find clause");
+    line_error (type, "could not find clause");
 }
 
-static void imported_find_then_restore_clause (void) {
-  literals_imported ();
+static void imported_find_then_restore_clause (int type) {
+  check_literals_imported (type);
   struct clause *c = find_weakened_clause ();
   if (c)
     restore_clause (c);
   else
-    line_error ('r', "could not find and restore weakened clause");
+    line_error (type, "could not find and restore weakened clause");
 }
 
-static void imported_find_then_weaken_clause (void) {
-  literals_imported ();
+static void imported_find_then_weaken_clause (int type) {
+  check_literals_imported (type);
   struct clause *c = find_active_clause ();
   if (c)
     weaken_clause (c);
   else
-    line_error ('w', "could not find and weaken clause");
+    line_error (type, "could not find and weaken clause");
 }
 
 static bool is_learn_delete_restore_or_weaken (int type) {
@@ -1504,6 +1578,12 @@ static bool match_header (const char *expected) {
   verbose ("found '%s' header in '%s'", string, file->name);
   return true;
 }
+
+/*------------------------------------------------------------------------*/
+
+// The main parsing and checking routine can be found below.  It is a simple
+// state-machine implemented with GOTO style programming and uses the
+// following function to show state changes during logging.
 
 #ifndef NDEBUG
 
@@ -1754,6 +1834,14 @@ static int parse_and_check (void) {
   }
 }
 
+/*------------------------------------------------------------------------*/
+
+// Clean-up functions.
+
+// Without a global list of clauses we traverse watch lists during
+// deallocation of clauses and only deallocate a clauses if we visit it the
+// second time through its larger watch.
+
 static void release_watches (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
     struct clauses *watches = matrix + lit;
@@ -1802,6 +1890,10 @@ static void release (void) {
   free (imported);
   free (levels);
 }
+
+/*------------------------------------------------------------------------*/
+
+// Resource usage and statistics printing code.
 
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -1870,6 +1962,10 @@ static void print_statistics (void) {
   fflush (stdout);
 }
 
+/*------------------------------------------------------------------------*/
+
+// Signal handling to print statistics if aborted.
+
 #define SIGNALS \
   SIGNAL (SIGABRT) \
   SIGNAL (SIGBUS) \
@@ -1917,6 +2013,8 @@ static void init_signals (void) {
 #define SIGNAL(SIG) saved_##SIG##_handler = signal (SIG, catch_signal);
   SIGNALS
 }
+
+/*------------------------------------------------------------------------*/
 
 int main (int argc, char **argv) {
   for (int i = 1; i != argc; i++) {

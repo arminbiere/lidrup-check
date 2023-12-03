@@ -868,7 +868,8 @@ static void watch_clause (struct clause *c) {
         backtrack (level1 - 1);
       }
     }
-    watch_clause (c);
+    watch_literal (lit0, c);
+    watch_literal (lit1, c);
   }
 }
 

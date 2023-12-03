@@ -818,12 +818,12 @@ static void import_literal (int lit) {
   assert (lit);
   assert (lit != INT_MIN);
   int idx = abs (lit);
-  if (idx <= max_var)
-    return;
-  if (idx == INT_MAX)
-    parse_error ("can not handle INT_MAX variables");
-  if (idx > max_var)
-    increase_max_var (idx);
+  if (max_var < idx) {
+    if (idx == INT_MAX)
+      parse_error ("can not handle INT_MAX variables");
+    if (idx > max_var)
+      increase_max_var (idx);
+  }
   if (!imported[idx]) {
     imported[idx] = true;
     statistics.imported++;
@@ -937,7 +937,6 @@ static void assign_assumption (int lit) {
 // Variables are only unassigned during backtracking.
 
 static void backtrack (unsigned new_level) {
-  assert (!inconsistent);
   assert (new_level < level);
   debug ("backtracking to decision level %u", new_level);
   int *new_trail_end = peek_control (new_level);
@@ -1256,7 +1255,7 @@ static void check_implied (int type) {
     return;
   }
 
-  if (failed) {
+  if (type == 'l' && failed) {
     debug ("skipping implication check as query already failed");
     return;
   }
@@ -1274,62 +1273,82 @@ static void check_implied (int type) {
     }
   }
 
-  // Then care about assumptions.
-
   size_t size_query = SIZE (query);
+
+  if (type == 'l') {
+
+    // Then care about assumptions.
+
 #ifndef NDEBUG
-  assert (level <= size_query);
-  for (size_t i = 0; i != level; i++) {
-    int assumption = query.begin[i];
-    assert (values[assumption] > 0);
-  }
-#endif
-  assert (!failed);
-  while (level < size_query) {
-    int assumption = query.begin[level];
-    signed char value = values[assumption];
-    if (value < 0) {
-      debug ("assumption %s falsified", debug_literal (assumption));
-      failed = true;
-      goto IMPLICATION_CHECK_SUCCEEDED;
-    } else if (value > 0) {
-      debug ("assumption %s already satisfied", debug_literal (assumption));
-      push_control ();
-      debug ("faking decision");
-    } else {
-      assert (!value);
-      assign_assumption (assumption);
+    assert (level <= size_query);
+    for (size_t i = 0; i != level; i++) {
+      int assumption = query.begin[i];
+      assert (values[assumption] > 0);
     }
+#endif
+    assert (!failed);
+    while (level < size_query) {
+      int assumption = query.begin[level];
+      signed char value = values[assumption];
+      if (value < 0) {
+        debug ("assumption %s falsified", debug_literal (assumption));
+        failed = true;
+        goto IMPLICATION_CHECK_SUCCEEDED;
+      } else if (value > 0) {
+        debug ("assumption %s already satisfied",
+               debug_literal (assumption));
+        push_control ();
+        debug ("faking decision");
+      } else {
+        assert (!value);
+        assign_assumption (assumption);
+	if (!propagate ()) {
+	  failed = true;
+	  goto IMPLICATION_CHECK_SUCCEEDED;
+	}
+      }
+    }
+
+  } else if (level) {
+    debug ("forcing backtracking due to core checking");
+    backtrack (0);
+    assert (trail.propagate == trail.end);
   }
+
+  debug ("checking consistency of assumptions");
 
   // Finally after all root-level units have been propagated and all
   // assumptions are assigned, assume the negation of all literals in the
-  // lemma as decision.
+  // line as decision.
 
-  debug ("checking lemma is implied");
-  bool implied = false;
+  debug ("checking line is implied");
   for (all_elements (int, lit, line)) {
     signed char value = values[lit];
     if (value < 0)
       continue;
     if (value > 0) {
-      debug ("literal %s in lemma already satisfied", debug_literal (lit));
-      implied = true;
-      break;
+      debug ("literal %s already satisfied", debug_literal (lit));
+      goto IMPLICATION_CHECK_SUCCEEDED;
     }
     assign_decision (-lit);
+    if (!propagate ()) {
+      goto IMPLICATION_CHECK_SUCCEEDED;
+    }
   }
 
   // Finally propagate all the assumptions and decisions and if this
   // propagation does not give a conflict produce an error message.
 
-  if (!implied && propagate ())
-    line_error (type, "lemma not implied:");
-
-  if (level > size_query) // TODO what about more ILB?
-    backtrack (size_query);
+  line_error (type, "implication check failed:");
 
 IMPLICATION_CHECK_SUCCEEDED:
+
+  if (type == 'l') {
+    if (level > size_query) // TODO what about more ILB?
+      backtrack (size_query);
+  } else if (level)
+    backtrack (0);
+
   assert (level <= size_query);
   debug ("implication check succeeded");
 }
@@ -1491,11 +1510,6 @@ static void check_satisfied_clause (int type, struct clause *c) {
 static void check_model (int type) {
   debug ("checking model");
   mark_line ();
-  for (all_elements (int, lit, saved))
-    if (marks[-lit])
-      check_error (
-          "value %d in 'v' line inconsistent with line %zu in '%s'", lit,
-          start_of_saved, other_file->name);
   for (all_pointers (struct clause, c, deleted_input_clauses))
     check_satisfied_clause (type, c);
   for (int lit = -max_var; lit <= max_var; lit++)
@@ -1509,13 +1523,16 @@ static void check_model (int type) {
   statistics.conclusions++;
   statistics.models++;
   reset_checker (); // TODO needed?
+  debug ("model checked");
 }
 
-static void justify_core (void) {
+static void justify_core (int type) {
   debug ("justifying core");
+  check_implied (type);
   statistics.conclusions++;
   statistics.justifications++;
   reset_checker (); // TODO needed?
+  debug ("core justified");
 }
 
 static void check_literal_imported (int type, int lit) {
@@ -1859,7 +1876,7 @@ static int parse_and_check (void) {
     int type = next_line (0);
     if (type == 'j') {
       consistent_line (type);
-      justify_core ();
+      justify_core (type);
       goto INTERACTION_INPUT;
     } else {
       unexpected_line (type, "'j'");

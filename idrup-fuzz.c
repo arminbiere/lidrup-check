@@ -267,11 +267,9 @@ static void fuzz (uint64_t seed) {
       fputc ('v', icnf);
       unsigned values = pick (&rng, 0, vars);
       for (unsigned i = 0; i != values; i++) {
-        int idx = pick (&rng, 1, vars);
-        int sign = pick (&rng, 0, 1) ? -1 : 1;
-        int lit = idx * sign;
+        int lit = pick (&rng, 1, vars);
         int val = ccadical_val (solver, lit);
-        fprintf (icnf, " %d", val);
+        fprintf (icnf, " %d", val == lit ? lit : -lit);
         concluded = true;
       }
     } else {

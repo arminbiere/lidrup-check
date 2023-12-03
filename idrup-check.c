@@ -172,6 +172,8 @@ struct ints {
       RELEASE (S); \
   } while (0)
 
+#define PEEK(S, POS) (assert ((POS) < SIZE (S)), (S).begin[POS])
+
 #define all_elements(TYPE, E, S) \
   TYPE E, *E##_PTR = BEGIN (S), *const E##_END = END (S); \
   E##_PTR != E##_END && (E = *E##_PTR, 1); \
@@ -188,9 +190,6 @@ struct ints {
     for (all_elements (TYPE, E, SRC)) \
       PUSH (DST, E); \
   } while (0)
-
-#define MIN(A,B) \
-  ((A) < (B) ? (A) : (B))
 
 struct file {
   FILE *file;
@@ -558,7 +557,7 @@ struct clause {
   size_t lineno;
 #endif
   unsigned size;
-  bool active;
+  bool weakened;
   bool input;
   int lits[];
 };
@@ -587,8 +586,10 @@ static bool *imported;
 
 static struct {
   int *begin, *end;
-  int *units, *assumptions, *propagate;
+  int *units, *propagate;
 } trail;
+
+static struct { int **begin, **end; } control;
 
 static bool failed;
 static bool inconsistent;
@@ -661,7 +662,6 @@ static void increase_allocated (int idx) {
   {
     size_t size = SIZE (trail);
     size_t units = trail.units - trail.begin;
-    size_t assumptions = trail.assumptions - trail.begin;
     size_t propagated = trail.propagate - trail.begin;
     trail.begin =
         realloc (trail.begin, new_allocated * sizeof *trail.begin);
@@ -670,8 +670,15 @@ static void increase_allocated (int idx) {
     trail.end = trail.begin + size;
     trail.units = trail.begin + units;
     trail.propagate = trail.begin + propagated;
-    trail.assumptions = trail.begin + assumptions;
     allocated = new_allocated;
+  }
+  {
+    size_t size = SIZE (control);
+    control.begin =
+        realloc (control.begin, new_allocated * sizeof *control.begin);
+    if (!control.begin)
+      out_of_memory ("reallocating control of size %zu", new_allocated);
+    control.end = control.begin + size;
   }
 }
 
@@ -751,12 +758,12 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   va_start (ap, fmt);
   vprintf (fmt, ap);
   va_end (ap);
+  if (c->weakened)
+    fputs (" weakened", stdout);
   if (c->input)
     fputs (" input", stdout);
   else
     fputs (" lemma", stdout);
-  if (!c->active)
-    fputs (" inactive", stdout);
   printf (" size %u line %zu clause[%zu]", c->size, c->lineno, c->id);
   for (all_literals (lit, c))
     printf (" %s", debug_literal (lit));
@@ -770,16 +777,91 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   } while (false)
 #endif
 
-static void assign_root_level_units (int lit) {
+static void push_trail (int lit) {
+  assert (trail.end < trail.begin + max_var);
+  *trail.end++ = lit;
+}
+
+static void pop_trail (int *new_end) {
+  assert (trail.begin <= new_end);
+  assert (new_end <= trail.end);
+  debug ("truncating trail from %zu to %zu literals",
+         trail.end - trail.begin, new_end - trail.begin);
+  trail.end = new_end;
+  assert (trail.units <= new_end);
+  if (new_end < trail.propagate) {
+    debug ("truncating propatated from %zu to %zu literals",
+           trail.propagate - trail.begin, new_end - trail.begin);
+    trail.propagate = new_end;
+  }
+}
+
+static void push_control () {
+  level++;
+  debug ("increased decision level to %u", level);
+  assert (control.end < control.end + max_var);
+  *control.end++ = trail.end;
+}
+
+static int *peek_control (unsigned new_level) {
+  assert (new_level < level);
+  return PEEK (control, new_level);
+}
+
+static void pop_control (unsigned new_level) {
+  assert (new_level < level);
+  assert (new_level < SIZE (control));
+  level = new_level;
+  control.end = control.begin + new_level;
+  debug ("decreased decision level to %u", level);
+}
+
+static void assign_root_level_unit (int lit) {
   assert (!level);
   assert (trail.end == trail.units);
-  *trail.end++ = lit;
+  push_trail (lit);
   trail.units++;
   values[-lit] = -1;
   values[lit] = 1;
   int idx = abs (lit);
   levels[idx] = 0;
-  debug ("assigning %s as unit", debug_literal (lit));
+  debug ("assign %s as root-level unit", debug_literal (lit));
+}
+
+static void assign_forced (int lit, struct clause *c) {
+  assert (level || trail.end == trail.units);
+  push_trail (lit);
+  if (!level)
+    trail.units++;
+  values[-lit] = -1;
+  values[lit] = 1;
+  int idx = abs (lit);
+  levels[idx] = level;
+  debug_clause (c, "assign %s %sforced by", debug_literal (lit),
+                level ? "as root-level unit " : "");
+  (void) c;
+}
+
+static void assign_decision (int lit) {
+  push_control ();
+  push_trail (lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  int idx = abs (lit);
+  levels[idx] = level;
+  statistics.decisions++;
+  debug ("assign %s as decision", debug_literal (lit));
+}
+
+static void assign_assumption (int lit) {
+  push_control ();
+  push_trail (lit);
+  values[-lit] = -1;
+  values[lit] = 1;
+  int idx = abs (lit);
+  levels[idx] = level;
+  statistics.decisions++;
+  debug ("assign %s as assumption", debug_literal (lit));
 }
 
 static void watch_literal (int lit, struct clause *c) {
@@ -806,24 +888,25 @@ static void backtrack (unsigned new_level) {
   assert (!inconsistent);
   assert (new_level < level);
   debug ("backtracking to decision level %u", new_level);
-  while (trail.end > trail.begin) {
-    int lit = trail.end[-1];
+  int *new_trail_end = peek_control (new_level);
+  int *p = trail.end;
+  while (p != new_trail_end) {
+    int lit = *--p;
     assert (values[lit] > 0);
-    int idx = abs (lit);
-    if (levels[idx] <= new_level)
-      break;
-#ifndef NDEBUG
-    level = levels[idx];
-    debug ("unassigning %s", debug_literal (lit));
-#endif
-    assert (values[lit] > 0);
+    assert (values[-lit] < 0);
     values[lit] = values[-lit] = 0;
-    trail.end--;
+#ifndef NDEBUG
+    int idx = abs (lit);
+    unsigned lit_level = levels[idx];
+    assert (new_level < lit_level);
+    unsigned saved_level = level;
+    level = lit_level;
+    debug ("unassign %s", debug_literal (lit));
+    level = saved_level;
+#endif
   }
-  assert (trail.units <= trail.end);
-  trail.assumptions = MIN (trail.assumptions, trail.end);
-  trail.propagate = MIN (trail.propagate, trail.end);
-  level = new_level;
+  pop_control (new_level);
+  pop_trail (new_trail_end);
 }
 
 static struct clause *allocate_clause (bool input) {
@@ -842,7 +925,7 @@ static struct clause *allocate_clause (bool input) {
   c->lineno = file->start_of_line;
 #endif
   c->size = size;
-  c->active = true;
+  c->weakened = false;
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
   debug_clause (c, "allocate");
@@ -951,7 +1034,7 @@ static void add_clause (bool input) {
       debug_clause (c, "added root-level unit");
       backtrack (0);
     }
-    assign_root_level_units (unit);
+    assign_root_level_unit (unit);
   } else if (!falsified)
     debug_clause (c, "added");
   else if (c->size) {
@@ -1001,17 +1084,6 @@ static void save_query (void) {
   COPY (int, query, line);
   statistics.queries++;
   reset_checker ();
-}
-
-static void assign_forced (int lit, struct clause *c) {
-  assert (trail.end != trail.begin + max_var);
-  *trail.end++ = lit;
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = level;
-  debug_clause (c, "assigning %s forced by", debug_literal (lit));
-  (void) c;
 }
 
 static bool propagate (void) {
@@ -1068,30 +1140,6 @@ static bool propagate (void) {
   return res;
 }
 
-static void assign_decision (int lit) {
-  assert (trail.end != trail.begin + max_var);
-  *trail.end++ = lit;
-  level++;
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = level;
-  statistics.decisions++;
-  debug ("assigning %s as decision", debug_literal (lit));
-}
-
-static void assign_assumption (int lit) {
-  assert (trail.end != trail.begin + max_var);
-  *trail.end++ = lit;
-  level++;
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = level;
-  statistics.decisions++;
-  debug ("assigning %s as assumption", debug_literal (lit));
-}
-
 static void check_implied (void) {
 
   if (inconsistent) {
@@ -1104,7 +1152,7 @@ static void check_implied (void) {
     return;
   }
 
-  if (trail.units < trail.propagate) {
+  if (trail.propagate < trail.units) {
     if (level)
       backtrack (0);
     if (!propagate ()) {
@@ -1122,7 +1170,9 @@ static void check_implied (void) {
     assert (values[assumption] > 0);
   }
 #endif
-  while (!failed && level < size_query) {
+
+  assert (!failed);
+  while (level < size_query) {
     int assumption = query.begin[level];
     signed char value = values[assumption];
     if (value < 0) {
@@ -1131,7 +1181,7 @@ static void check_implied (void) {
       goto IMPLICATION_CHECK_SUCCEEDED;
     } else if (value > 0) {
       debug ("assumption %s already satisfied", debug_literal (assumption));
-      level++;
+      push_control ();
       debug ("faking decision");
     } else {
       assert (!value);
@@ -1188,13 +1238,10 @@ static void unmark_line (void) {
     unmark_literal (lit);
 }
 
-static struct clause *find_empty_clause (bool active,
-                                         bool required_to_be_input) {
+static struct clause *find_empty_clause (bool weakened) {
   assert (EMPTY (line));
   for (all_pointers (struct clause, c, empty_clauses)) {
-    if (c->active != active)
-      continue;
-    if (required_to_be_input && !c->input)
+    if (c->weakened != weakened)
       continue;
     debug_clause (c, "found_matching");
     return c;
@@ -1203,8 +1250,7 @@ static struct clause *find_empty_clause (bool active,
   return 0;
 }
 
-static struct clause *find_non_empty_clause (bool active,
-                                             bool required_to_be_input) {
+static struct clause *find_non_empty_clause (bool weakened) {
   size_t size = SIZE (line);
   assert (size);
   mark_line ();
@@ -1213,9 +1259,7 @@ static struct clause *find_non_empty_clause (bool active,
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size != size)
         continue;
-      if (c->active != active)
-        continue;
-      if (required_to_be_input && !c->input)
+      if (c->weakened != weakened)
         continue;
       for (all_literals (other, c))
         if (!marks[other])
@@ -1231,30 +1275,25 @@ static struct clause *find_non_empty_clause (bool active,
   return 0;
 }
 
-static struct clause *find_clause (bool active, bool required_to_be_input) {
+static struct clause *find_clause (bool weakened) {
   if (EMPTY (line))
-    return find_empty_clause (active, required_to_be_input);
+    return find_empty_clause (weakened);
   else
-    return find_non_empty_clause (active, required_to_be_input);
+    return find_non_empty_clause (weakened);
 }
 
-static struct clause *find_active_arbitrary_clause (void) {
+static struct clause *find_active_clause (void) {
   debug ("finding active clause");
-  return find_clause (true, false);
+  return find_clause (false);
 }
 
-static struct clause *find_inactive_input_clause (void) {
-  debug ("finding inactive input clause");
-  return find_clause (false, true);
-}
-
-static struct clause *find_active_input_clause (void) {
-  debug ("finding active input clause");
-  return find_clause (true, true);
+static struct clause *find_weakened_clause (void) {
+  debug ("finding weakened clause");
+  return find_clause (true);
 }
 
 static void delete_clause (struct clause *c) {
-  assert (c->active);
+  assert (!c->weakened);
   debug ("deleting clause");
   unwatch_clause (c);
   if (c->input) {
@@ -1265,13 +1304,15 @@ static void delete_clause (struct clause *c) {
   statistics.deleted++;
 }
 
-static void weaken_clause (struct clause *) {
-  debug ("weakening clause");
+static void weaken_clause (struct clause *c) {
+  assert (!c->weakened);
+  debug_clause (c, "weakening clause");
   statistics.weakened++;
 }
 
 static void restore_clause (struct clause *c) {
-  debug ("restoring clause");
+  assert (c->weakened);
+  debug_clause (c, "restoring clause");
   statistics.restored++;
 }
 
@@ -1301,38 +1342,38 @@ static void import_add_input (void) {
   statistics.inputs++;
 }
 
-static void import_check_add_lemma (void) {
+static void import_check_then_add_lemma (void) {
   import_literals ();
   check_implied ();
   add_clause (false);
   statistics.lemmas++;
 }
 
-static void imported_find_delete_clause (void) {
+static void imported_find_then_delete_clause (void) {
   literals_imported ();
-  struct clause *c = find_active_arbitrary_clause ();
+  struct clause *c = find_active_clause ();
   if (c)
     delete_clause (c);
   else
     line_error ('d', "could not find clause");
 }
 
-static void imported_find_restore_clause (void) {
+static void imported_find_then_restore_clause (void) {
   literals_imported ();
-  struct clause *c = find_inactive_input_clause ();
+  struct clause *c = find_weakened_clause ();
   if (c)
     restore_clause (c);
   else
-    line_error ('d', "could not restore clause");
+    line_error ('r', "could not find and restore weakened clause");
 }
 
-static void imported_find_weaken_clause (void) {
+static void imported_find_then_weaken_clause (void) {
   literals_imported ();
-  struct clause *c = find_active_input_clause ();
+  struct clause *c = find_active_clause ();
   if (c)
     weaken_clause (c);
   else
-    line_error ('d', "could not weaken clause");
+    line_error ('w', "could not find and weaken clause");
 }
 
 static bool is_learn_delete_restore_or_weaken (int type) {
@@ -1341,14 +1382,14 @@ static bool is_learn_delete_restore_or_weaken (int type) {
 
 static void learn_delete_restore_or_weaken (int type) {
   if (type == 'l')
-    import_check_add_lemma ();
+    import_check_then_add_lemma ();
   else if (type == 'd')
-    imported_find_delete_clause ();
+    imported_find_then_delete_clause ();
   else if (type == 'r')
-    imported_find_restore_clause ();
+    imported_find_then_restore_clause ();
   else {
     assert (type == 'w');
-    imported_find_weaken_clause ();
+    imported_find_then_weaken_clause ();
   }
 }
 
@@ -1672,6 +1713,7 @@ static void release (void) {
   release_empty_clauses ();
   release_deleted_input_clauses ();
   free (trail.begin);
+  free (control.begin);
   matrix -= allocated;
   free (matrix);
   values -= allocated;

@@ -94,7 +94,7 @@ fi
 COMPILE="gcc -Wall"
 
 [ $check = no ] && COMPILE="$COMPILE -DNDEBUG"
-[ $symbols = yes ] && COMPILE="$COMPILE -ggdb3"
+[ $symbols = yes ] && COMPILE="$COMPILE -g -ggdb3"
 [ $debug = no ] && COMPILE="$COMPILE -O3"
 
 msg "using '$COMPILE'"

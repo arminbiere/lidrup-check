@@ -552,8 +552,8 @@ static struct {
 struct clause {
 #ifndef NDEBUG
   size_t id;
-#endif
   size_t lineno;
+#endif
   unsigned size;
   bool active;
   bool input;
@@ -746,11 +746,6 @@ static void watch_literal (int lit, struct clause *c) {
   PUSH (matrix[lit], c);
 }
 
-static void watch_clause (struct clause *c) {
-  for (unsigned i = 0; i != 2 && i != c->size; i++)
-    watch_literal (c->lits[i], c);
-}
-
 static void unwatch_literal (int lit, struct clause *c) {
   debug_clause (c, "unwatching %s in", debug_literal (lit));
   struct clauses *watches = matrix + lit;
@@ -758,8 +753,12 @@ static void unwatch_literal (int lit, struct clause *c) {
 }
 
 static void unwatch_clause (struct clause *c) {
-  for (unsigned i = 0; i != 2 && i != c->size; i++)
-    unwatch_literal (c->lits[i], c);
+  if (c->size) {
+    unwatch_literal (c->lits[0], c);
+    if (c->size > 1)
+      unwatch_literal (c->lits[1], c);
+  } else
+    REMOVE (struct clause *, empty_clauses, c);
 }
 
 static void backtrack (unsigned new_level) {
@@ -785,7 +784,7 @@ static void backtrack (unsigned new_level) {
   level = new_level;
 }
 
-static void add_clause (bool input) {
+static struct clause *allocate_clause (bool input) {
   size_t size = SIZE (line);
   if (size > UINT_MAX)
     parse_error ("maximum clause size exhausted");
@@ -798,86 +797,118 @@ static void add_clause (bool input) {
   statistics.added++;
 #ifndef NDEBUG
   c->id = statistics.added;
-#endif
   c->lineno = file->start_of_line;
+#endif
   c->size = size;
   c->active = true;
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
+  debug_clause (c, "allocate");
+  return c;
+}
 
-  debug_clause (c, "added");
+static int move_best_watch_to_front (int *lits, const int *const end) {
+  int watch = *lits;
+  signed char watch_value = values[watch];
+  if (watch_value) {
+    unsigned watch_level = levels[abs (watch)];
+    for (int *p = lits + 1; p != end; p++) {
+      int lit = *p;
+      signed char lit_value = values[lit];
+      unsigned lit_level = levels[abs (lit)];
+      if (!lit_value || watch_level < lit_level ||
+          (watch_level == lit_level && watch_value < lit_value)) {
+        *p = watch;
+        *lits = lit;
+        if (!lit_value)
+          return lit;
+        watch_level = lit_level;
+        watch_value = lit_value;
+        watch = lit;
+      }
+    }
+  }
+  return watch;
+}
 
-  if (!size)
+static void watch_clause (struct clause *c) {
+  if (!c->size)
     PUSH (empty_clauses, c);
-  else if (size == 1)
+  else if (c->size == 1)
     watch_literal (c->lits[0], c);
   else {
     int *lits = c->lits;
-    for (size_t i = 0; i != 2; i++) {
-      int watch = lits[i];
-      signed char watch_value = values[watch];
-      if (!watch_value)
-        continue;
-      unsigned watch_level = levels[abs (watch)];
-      for (size_t j = i + 1; j != size; j++) {
-        int lit = lits[j];
-        signed char lit_value = values[lit];
-        unsigned lit_level = levels[abs (lit)];
-        if (!lit_value || watch_level < lit_level ||
-            (watch_level == lit_level && watch_value < lit_value)) {
-          lits[j] = watch;
-          lits[i] = lit;
-          if (!lit_value)
-            break;
-          watch_level = lit_level;
-          watch_value = lit_value;
-          watch = lit;
-        }
-      }
-    }
-    {
-      int lit0 = lits[0], lit1 = lits[1];
-      debug ("watches %s and %s", debug_literal (lit0),
-             debug_literal (lit1));
-      signed char val1 = values[lit1];
-      if (val1 >= 0)
-        debug ("second lower level watch not falsified");
-      else {
-        debug ("second lower level watch falsified");
-        signed char val0 = values[lit0];
-        unsigned level0 = levels[abs (lit0)];
-        unsigned level1 = levels[abs (lit1)];
-        if (level1)
-          if (val0 <= 0 || level0 > level1)
-            backtrack (level1 - 1);
+    const int *const end = lits + c->size;
+    int lit0 = move_best_watch_to_front (lits, end);
+    int lit1 = move_best_watch_to_front (lits + 1, end);
+    debug ("first watch %s", debug_literal (lit0));
+    debug ("second watch %s", debug_literal (lit1));
+    signed char val1 = values[lit1];
+    if (val1 >= 0)
+      debug ("second watch %s not falsified", debug_literal (lit1));
+    else {
+      signed char val0 = values[lit0];
+      unsigned level0 = levels[abs (lit0)];
+      unsigned level1 = levels[abs (lit1)];
+      if (level1 && (val0 <= 0 || level0 > level1)) {
+#ifndef NDEBUG
+        if (val0 <= 0)
+          debug ("second watch %s falsified at decision level %u "
+                 "and first watch %s not satisfied "
+                 "forces backtracking to decision level %u",
+                 debug_literal (lit1), level1, debug_literal (lit0),
+                 level1 - 1);
+        else
+          debug ("second watch %s falsified at decision level %u and "
+                 "first watch %s satisfied at larger decision level %u "
+                 "forces backtracking to decision level %u",
+                 debug_literal (lit1), level1, debug_literal (lit0), level1,
+                 level1 - 1);
+#endif
+        backtrack (level1 - 1);
       }
     }
     watch_clause (c);
   }
+}
 
+static int find_unit (struct clause *c, bool *satisfied, bool *falsified) {
   int unit = 0;
   for (all_literals (lit, c)) {
     signed char value = values[lit];
-    if (levels[abs (lit)])
+    if (value && levels[abs (lit)])
       value = 0;
     if (value > 0) {
-      debug_clause (c, "literal %s satisfies", debug_literal (lit));
-      return;
+      *satisfied = true;
+      return 0;
     } else if (!value) {
       if (unit)
-        return;
+        return 0;
       unit = lit;
     }
   }
+  if (!unit)
+    *falsified = true;
+  return unit;
+}
 
-  if (unit) {
+static void add_clause (bool input) {
+  struct clause *c = allocate_clause (input);
+  watch_clause (c);
+  bool satisfied = false, falsified = false;
+  int unit = find_unit (c, &satisfied, &falsified);
+  if (satisfied)
+    debug_clause (c, "added root-level satisfied");
+  else if (unit) {
     if (level) {
-      debug ("unit forces backtracking");
+      debug_clause (c, "added root-level unit");
       backtrack (0);
     }
     assign_unit (unit);
-  } else if (size) {
-    debug_clause (c, "all literals falsified in");
+  } else if (!falsified)
+    debug_clause (c, "added");
+  else if (c->size) {
+    debug_clause (c, "all literals falsified in added");
     if (!inconsistent) {
       if (input)
         message ("inconsistent input clause");
@@ -886,7 +917,7 @@ static void add_clause (bool input) {
       inconsistent = true;
     }
   } else {
-    debug_clause (c, "empty");
+    debug_clause (c, "added empty");
     if (!inconsistent) {
       if (input)
         message ("empty input clause");
@@ -1326,11 +1357,12 @@ static void debug_state (const char *name) {
 
 static int parse_and_check (void) {
 
-  // By default any parse error or failed check will abort the program with
-  // exit code '1' except in 'relaxed' parsing mode where parsing and
-  // checking continues if in the proof a model 'v' line is missing after a
-  // 's SATISFIABLE' status line. Without having such a model the checker
-  // can not guarantee the input clauses to be satisfied at this point.
+  // By default any parse error or failed check will abort the program
+  // with exit code '1' except in 'relaxed' parsing mode where parsing and
+  // checking continues if in the proof a model 'v' line is missing after
+  // a 's SATISFIABLE' status line. Without having such a model the
+  // checker can not guarantee the input clauses to be satisfied at this
+  // point.
 
   // For missing 'j' justification lines the checker might end up in
   // a similar situation (in case the user claims a justification core
@@ -1338,7 +1370,7 @@ static int parse_and_check (void) {
   // program continues without error but simply exit with exit code '2' to
   // denote that checking only partially.
 
-  int res = 0;	// The exit code of the program without error.
+  int res = 0; // The exit code of the program without error.
 
   verbose ("starting interactions and proof checking in strict mode");
   goto INTERACTION_HEADER; // Explicitly start with this state.

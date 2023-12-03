@@ -12,7 +12,6 @@ pdfs:$(dots:.dot=.pdf)
 clean:
 	rm -f makefile idrup-check idrup-fuzz
 	rm -f test/*log test/*err
-	rm -f *.pdf
 format:
 	clang-format -i idrup-check.c
 test: all

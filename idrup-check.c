@@ -151,6 +151,27 @@ struct ints {
     *END (S)++ = (E); \
   } while (0)
 
+#define REMOVE(TYPE, S, E) \
+  do { \
+    TYPE *BEGIN = (S).begin; \
+    TYPE *END = (S).end; \
+    TYPE *Q = BEGIN; \
+    TYPE *P = Q; \
+    for (;;) { \
+      assert (P != END); \
+      TYPE TMP = *P++; \
+      if (TMP == (E)) \
+        break; \
+      *Q++ = TMP; \
+    } \
+    assert (Q + 1 == P); \
+    while (P != END) \
+      *Q++ = *P++; \
+    (S).end = Q; \
+    if (EMPTY (S)) \
+      RELEASE (S); \
+  } while (0)
+
 #define all_elements(TYPE, E, S) \
   TYPE E, *E##_PTR = BEGIN (S), *const E##_END = END (S); \
   E##_PTR != E##_END && (E = *E##_PTR, 1); \
@@ -733,19 +754,7 @@ static void watch_clause (struct clause *c) {
 static void unwatch_literal (int lit, struct clause *c) {
   debug_clause (c, "unwatching %s in", debug_literal (lit));
   struct clauses *watches = matrix + lit;
-  struct clause **begin = watches->begin, **q = begin, **p = q;
-  struct clause **end = watches->end;
-  for (;;) {
-    assert (p != end);
-    struct clause *d = *p++;
-    if (c == d)
-      break;
-    *q++ = d;
-  }
-  assert (q + 1 == p);
-  while (p != end)
-    *q++ = *p++;
-  watches->end = q;
+  REMOVE (struct clause *, *watches, c);
 }
 
 static void unwatch_clause (struct clause *c) {
@@ -1080,30 +1089,42 @@ static void mark_literal (int lit) {
   marks[lit] = 1;
 }
 
-static void mark_literals (const int *lits, size_t size) {
-  const int *const end = lits + size;
-  for (const int *p = lits; p != end; p++)
-    mark_literal (*p);
-}
-
 static void unmark_literal (int lit) {
   debug ("unmarking %s", debug_literal (lit));
   marks[lit] = 0;
 }
 
-static void unmark_literals (const int *lits, size_t size) {
-  const int *const end = lits + size;
-  for (const int *p = lits; p != end; p++)
-    unmark_literal (*p);
+static void mark_line (void) {
+  for (all_elements (int, lit, line))
+    mark_literal (lit);
 }
 
-static struct clause *find_clause (bool active, bool required_to_be_input) {
-  const int *lits = line.begin;
-  const int *const end_lits = line.end;
-  const size_t size = end_lits - lits;
-  mark_literals (lits, size);
-  for (const int *p = lits; p != end_lits; p++) {
-    const int lit = *p;
+static void unmark_line (void) {
+  for (all_elements (int, lit, line))
+    unmark_literal (lit);
+}
+
+static struct clause *find_empty_clause (bool active,
+                                         bool required_to_be_input) {
+  assert (EMPTY (line));
+  for (all_pointers (struct clause, c, empty_clauses)) {
+    if (c->active != active)
+      continue;
+    if (required_to_be_input && !c->input)
+      continue;
+    debug_clause (c, "found_matching");
+    return c;
+  }
+  debug ("no matching clause found");
+  return 0;
+}
+
+static struct clause *find_non_empty_clause (bool active,
+                                             bool required_to_be_input) {
+  size_t size = SIZE (line);
+  assert (size);
+  mark_line ();
+  for (all_elements (int, lit, line)) {
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size != size)
@@ -1115,34 +1136,41 @@ static struct clause *find_clause (bool active, bool required_to_be_input) {
       for (all_literals (other, c))
         if (!marks[other])
           goto CONTINUE_WITH_NEXT_CLAUSE;
-      unmark_literals (lits, size);
+      unmark_line ();
       debug_clause (c, "found matching");
       return c;
     CONTINUE_WITH_NEXT_CLAUSE:;
     }
   }
+  unmark_line ();
   debug ("no matching clause found");
   return 0;
 }
 
-static struct clause *find_active_arbitrary_clause () {
+static struct clause *find_clause (bool active, bool required_to_be_input) {
+  if (EMPTY (line))
+    return find_empty_clause (active, required_to_be_input);
+  else
+    return find_non_empty_clause (active, required_to_be_input);
+}
+
+static struct clause *find_active_arbitrary_clause (void) {
   debug ("finding active clause");
   return find_clause (true, false);
 }
 
-static struct clause *find_inactive_input_clause () {
+static struct clause *find_inactive_input_clause (void) {
   debug ("finding inactive input clause");
   return find_clause (false, true);
 }
 
-static struct clause *find_active_input_clause () {
+static struct clause *find_active_input_clause (void) {
   debug ("finding active input clause");
   return find_clause (true, true);
 }
 
 static void delete_clause (struct clause *c) {
-  if (!c->active)
-    check_error ("clause weakened at line %zu and not restored", c->lineno);
+  assert (c->active);
   debug ("deleting clause");
   unwatch_clause (c);
   if (c->input) {
@@ -1199,28 +1227,28 @@ static void import_check_add_lemma (void) {
 static void imported_find_delete_clause (void) {
   literals_imported ();
   struct clause *c = find_active_arbitrary_clause ();
-  if (!c)
+  if (c)
+    delete_clause (c);
+  else
     line_error ('d', "could not find clause");
-  delete_clause (c);
-  statistics.deleted++;
 }
 
 static void imported_find_restore_clause (void) {
   literals_imported ();
   struct clause *c = find_inactive_input_clause ();
-  if (!c)
+  if (c)
+    restore_clause (c);
+  else
     line_error ('d', "could not restore clause");
-  restore_clause (c);
-  statistics.restored++;
 }
 
 static void imported_find_weaken_clause (void) {
   literals_imported ();
   struct clause *c = find_active_input_clause ();
-  if (!c)
+  if (c)
+    weaken_clause (c);
+  else
     line_error ('d', "could not weaken clause");
-  weaken_clause (c);
-  statistics.weakened++;
 }
 
 static bool is_learn_delete_restore_or_weaken (int type) {
@@ -1300,16 +1328,17 @@ static int parse_and_check (void) {
 
   // By default any parse error or failed check will abort the program with
   // exit code '1' except in 'relaxed' parsing mode where parsing and
-  // checking continues even if model 'v ...' lines are missing after an 's
-  // SATISFIABLE' status line in the proof. Without having such a model the
-  // checker can not guarantee that the input clauses can be satisfied at
-  // this point.  For missing 'j' justification lines the checker might end
-  // up in a similar situation (in case the user claims a justification
-  // which however core is not implied by unit propagation).  In these cases
-  // the program continues without error but simply exit with exit code '2'
-  // to denote that only partial checking succeeded to which 'res' is set.
+  // checking continues if in the proof a model 'v' line is missing after a
+  // 's SATISFIABLE' status line. Without having such a model the checker
+  // can not guarantee the input clauses to be satisfied at this point.
 
-  int res = 0;
+  // For missing 'j' justification lines the checker might end up in
+  // a similar situation (in case the user claims a justification core
+  // which is not implied by unit propagation).  In these cases the
+  // program continues without error but simply exit with exit code '2' to
+  // denote that checking only partially.
+
+  int res = 0;	// The exit code of the program without error.
 
   verbose ("starting interactions and proof checking in strict mode");
   goto INTERACTION_HEADER; // Explicitly start with this state.

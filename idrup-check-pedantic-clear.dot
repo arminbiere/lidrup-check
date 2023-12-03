@@ -3,10 +3,12 @@ digraph "idrup-check" {
   INTERACTION_HEADER [shape=box];
   INTERACTION_HEADER -> PROOF_HEADER [label=" p icnf",weight=2];
 
-  empty_legend1 [style=invis]
-  empty_legend2 [style=invis]
-  icnf_legend [shape=box,style=dashed,label="reading ICNF interaction file"]
-  idrup_legend [style=dashed,label="reading IDRUP proof file"]
+  empty_legend1 [label="                     ",style=invis]
+  icnf_legend
+  [shape=box,color=darkgray,fontcolor=darkgray,style=dashed,label="reading from ICNF interaction file"]
+  //empty_legend2 [label="      ",style=invis]
+  idrup_legend
+  [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from IDRUP proof file"]
 
   "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
    "end-of-checking" -> INTERACTION_INPUT [label="  $    ",dir=back,fontcolor=darkgray,color=darkgray];

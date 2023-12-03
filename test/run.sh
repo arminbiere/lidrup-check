@@ -53,4 +53,6 @@ run 0 dp2
 run 0 dp3
 run 0 dp4
 
+run 0 regr1
+
 echo "all $passed tests passed"

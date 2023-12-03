@@ -1770,6 +1770,7 @@ static int parse_and_check (void) {
     int type = next_line (0);
     if (type == 'q') {
       match_saved ("query");
+      import_literals ();
       save_query ();
       goto PROOF_CHECK;
     } else if (type == 'p') {

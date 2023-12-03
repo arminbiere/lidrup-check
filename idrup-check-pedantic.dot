@@ -1,8 +1,8 @@
 digraph "idrup-check" {
 
   INTERACTION_HEADER [shape=box];
-  INTERACTION_HEADER -> PROOF_HEADER [label=" p icnf | ε "];
-  PROOF_HEADER -> INTERACTION_INPUT [label=" p idrup | ε "];
+  INTERACTION_HEADER -> PROOF_HEADER [label=" p icnf"];
+  PROOF_HEADER -> INTERACTION_INPUT [label=" p idrup"];
 
   "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
   "end-of-checking" -> INTERACTION_INPUT [label="$    ",dir=back,color=darkgray,fontcolor=darkgray];

@@ -1097,128 +1097,47 @@ static void unmark_literals (const int *lits, size_t size) {
     unmark_literal (*p);
 }
 
-static struct clause *find_active_clause () {
-  debug ("finding active clause");
+static struct clause *find_clause (bool active, bool required_to_be_input) {
   const int *lits = line.begin;
   const int *const end_lits = line.end;
   const size_t size = end_lits - lits;
   mark_literals (lits, size);
-  struct clause *res = 0, *inactive = 0;
   for (const int *p = lits; p != end_lits; p++) {
     const int lit = *p;
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size != size)
         continue;
+      if (c->active != active)
+        continue;
+      if (required_to_be_input && !c->input)
+        continue;
       for (all_literals (other, c))
         if (!marks[other])
           goto CONTINUE_WITH_NEXT_CLAUSE;
-      if (!c->active) {
-        if (!inactive)
-          inactive = c;
-        goto CONTINUE_WITH_NEXT_CLAUSE;
-      }
-      res = c;
-      debug_clause (c, "found matching active");
-      goto FOUND_CLAUSE;
+      unmark_literals (lits, size);
+      debug_clause (c, "found matching");
+      return c;
     CONTINUE_WITH_NEXT_CLAUSE:;
     }
   }
-FOUND_CLAUSE:
-  unmark_literals (lits, size);
-  if (!res) {
-    if (inactive)
-      check_error ("only inactive matching clause found");
-    else
-      check_error ("no active matching clause found");
-  }
-  return res;
+  debug ("no matching clause found");
+  return 0;
+}
+
+static struct clause *find_active_arbitrary_clause () {
+  debug ("finding active clause");
+  return find_clause (true, false);
 }
 
 static struct clause *find_inactive_input_clause () {
-  debug ("finding inactive clause");
-  const int *lits = line.begin;
-  const int *const end_lits = line.end;
-  const size_t size = end_lits - lits;
-  mark_literals (lits, size);
-  struct clause *res = 0, *active = 0;
-  for (const int *p = lits; p != end_lits; p++) {
-    const int lit = *p;
-    struct clauses *watches = matrix + lit;
-    for (all_pointers (struct clause, c, *watches)) {
-      if (c->size != size)
-        continue;
-      for (all_literals (other, c))
-        if (!marks[other])
-          goto CONTINUE_WITH_NEXT_CLAUSE;
-      if (c->active) {
-        if (!active)
-          active = c;
-        goto CONTINUE_WITH_NEXT_CLAUSE;
-      }
-      res = c;
-      assert (c->input);
-      debug_clause (c, "found matching inactive");
-      goto FOUND_CLAUSE;
-    CONTINUE_WITH_NEXT_CLAUSE:;
-    }
-  }
-FOUND_CLAUSE:
-  unmark_literals (lits, size);
-  if (!res) {
-    if (active)
-      check_error ("only active matching clause found");
-    else
-      check_error ("no inactive matching clause found");
-  }
-  return res;
+  debug ("finding inactive input clause");
+  return find_clause (false, true);
 }
 
 static struct clause *find_active_input_clause () {
   debug ("finding active input clause");
-  const int *lits = line.begin;
-  const int *const end_lits = line.end;
-  const size_t size = end_lits - lits;
-  mark_literals (lits, size);
-  struct clause *res = 0, *inactive = 0, *non_input = 0;
-  for (const int *p = lits; p != end_lits; p++) {
-    const int lit = *p;
-    struct clauses *watches = matrix + lit;
-    for (all_pointers (struct clause, c, *watches)) {
-      if (c->size != size)
-        continue;
-      for (all_literals (other, c))
-        if (!marks[other])
-          goto CONTINUE_WITH_NEXT_CLAUSE;
-      if (!c->active) {
-        if (!inactive)
-          inactive = c;
-        goto CONTINUE_WITH_NEXT_CLAUSE;
-      }
-      if (!c->input) {
-	if (!non_input)
-	  non_input = c;
-	goto CONTINUE_WITH_NEXT_CLAUSE;
-      }
-      res = c;
-      debug_clause (c, "found matching active");
-      goto FOUND_CLAUSE;
-    CONTINUE_WITH_NEXT_CLAUSE:;
-    }
-  }
-FOUND_CLAUSE:
-  unmark_literals (lits, size);
-  if (!res) {
-    if (inactive && non_input)
-      check_error ("only inactive and non-input matching clause found");
-    else if (inactive)
-      check_error ("only inactive matching clause found");
-    else if (non_input)
-      check_error ("only non-input matching clause found");
-    else
-      check_error ("no active matching clause found");
-  }
-  return res;
+  return find_clause (true, true);
 }
 
 static void delete_clause (struct clause *c) {
@@ -1279,7 +1198,9 @@ static void import_check_add_lemma (void) {
 
 static void imported_find_delete_clause (void) {
   literals_imported ();
-  struct clause *c = find_active_clause ();
+  struct clause *c = find_active_arbitrary_clause ();
+  if (!c)
+    line_error ('d', "could not find clause");
   delete_clause (c);
   statistics.deleted++;
 }
@@ -1287,6 +1208,8 @@ static void imported_find_delete_clause (void) {
 static void imported_find_restore_clause (void) {
   literals_imported ();
   struct clause *c = find_inactive_input_clause ();
+  if (!c)
+    line_error ('d', "could not restore clause");
   restore_clause (c);
   statistics.restored++;
 }
@@ -1294,6 +1217,8 @@ static void imported_find_restore_clause (void) {
 static void imported_find_weaken_clause (void) {
   literals_imported ();
   struct clause *c = find_active_input_clause ();
+  if (!c)
+    line_error ('d', "could not weaken clause");
   weaken_clause (c);
   statistics.weakened++;
 }

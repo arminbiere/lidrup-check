@@ -122,9 +122,19 @@ static struct file *proof = files + 1;
 
 static struct file *file;
 
+// The other file different from 'file' (so 'other_file == interactions'
+// if 'file == proof' and vice versa).
+
+static struct file *other_file;
+
 static struct ints line;  // Current line of integers parsed.
 static struct ints saved; // Saved line for checking.
 static struct ints query; // Saved query for checking.
+
+// When saving a line the start of the line is saved too.
+
+static size_t start_of_saved;
+;
 
 // Constant strings parsed in 'p' and 's' lines.
 
@@ -515,6 +525,9 @@ static inline void set_file (struct file *new_file) {
   assert (new_file);
   assert (new_file->file);
   file = new_file;
+  other_file = file == interactions ? proof : interactions;
+  assert (other_file);
+  assert (other_file->file);
 }
 
 static int read_char (void) {
@@ -1236,7 +1249,7 @@ static void save_query (void) {
 // are indeed reverse unit propagation (RUP) implied.  It is slightly more
 // complicated as it needs to care about units and assumptions.
 
-static void check_implied (void) {
+static void check_implied (int type) {
 
   if (inconsistent) {
     debug ("skipping implication check as formula is inconsistent");
@@ -1311,7 +1324,7 @@ static void check_implied (void) {
   // propagation does not give a conflict produce an error message.
 
   if (!implied && propagate ())
-    line_error ('l', "lemma not implied:");
+    line_error (type, "lemma not implied:");
 
   if (level > size_query) // TODO what about more ILB?
     backtrack (size_query);
@@ -1448,18 +1461,49 @@ static void restore_clause (struct clause *c) {
   statistics.restored++;
 }
 
-static void check_model (void) {
-  debug ("checking model");
+static void consistent_line (int type) {
   for (all_elements (int, lit, line)) {
     if (marks[-lit])
-      line_error ('v', "invalid model contains both %d and %d", -lit, lit);
-    else if (marks[lit])
-      debug ("ignoring duplicated literal %s", debug_literal (lit));
-    else {
-      debug ("marking %s", debug_literal (lit));
-      marks[lit] = true;
-    }
+      check_error ("inconsistent '%d' line with both %d and %d", type, -lit,
+                   lit);
+    marks[lit] = true;
   }
+  unmark_line ();
+}
+
+static void check_satisfied_clause (int type, struct clause *c) {
+  for (all_literals (lit, c))
+    if (marks[lit])
+      return;
+  fflush (stdout);
+  fprintf (stderr,
+           "idrup-check: error: model at line %zu in '%s' "
+	   "does not satisfy %s clause:\n",
+	   file->start_of_line, file->name,
+	   c->input ? "input" : "derived"); // Defensive!!!
+  fputc (c->input ? 'i' : 'l', stderr);
+  for (all_literals (lit, c))
+    fprintf (stderr, " %d", lit);
+  fputs (" 0\n", stderr);
+  exit (1);
+}
+
+static void check_model (int type) {
+  debug ("checking model");
+  mark_line ();
+  for (all_elements (int, lit, saved))
+    if (marks[-lit])
+      line_error (type, "value %d inconsistent with line %zu in '%s'", lit,
+                  start_of_saved, other_file->name);
+  for (all_pointers (struct clause, c, deleted_input_clauses))
+    check_satisfied_clause (type, c);
+  for (int lit = -max_var; lit <= max_var; lit++)
+    if (lit) {
+      struct clauses * watches = matrix + lit;
+      for (all_pointers (struct clause, c, *watches))
+	if (c->input && !c->weakened)
+	  check_satisfied_clause (type, c);
+    }
   unmark_line ();
   statistics.conclusions++;
   statistics.models++;
@@ -1476,13 +1520,13 @@ static void justify_core (void) {
 static void check_literal_imported (int type, int lit) {
   int idx = abs (lit);
   if (idx > max_var || !imported[idx])
-    line_error (type, "literal %d unused");
+    line_error (type, "literal %d unused", lit);
 }
 
 static void check_literals_imported (int type) {
   debug ("checking literals imported");
   for (all_elements (int, lit, line))
-    literal_imported (type, lit);
+    check_literal_imported (type, lit);
 }
 
 /*------------------------------------------------------------------------*/
@@ -1495,15 +1539,15 @@ static void import_add_input (void) {
   statistics.inputs++;
 }
 
-static void import_check_then_add_lemma (void) {
+static void import_check_then_add_lemma (int type) {
   import_literals ();
-  check_implied ();
+  check_implied (type);
   add_clause (false);
   statistics.lemmas++;
 }
 
 static void imported_find_then_delete_clause (int type) {
-  check_literals_imported ();
+  check_literals_imported (type);
   struct clause *c = find_active_clause ();
   if (c)
     delete_clause (c);
@@ -1535,14 +1579,14 @@ static bool is_learn_delete_restore_or_weaken (int type) {
 
 static void learn_delete_restore_or_weaken (int type) {
   if (type == 'l')
-    import_check_then_add_lemma ();
+    import_check_then_add_lemma (type);
   else if (type == 'd')
-    imported_find_then_delete_clause ();
+    imported_find_then_delete_clause (type);
   else if (type == 'r')
-    imported_find_then_restore_clause ();
+    imported_find_then_restore_clause (type);
   else {
     assert (type == 'w');
-    imported_find_then_weaken_clause ();
+    imported_find_then_weaken_clause (type);
   }
 }
 
@@ -1565,6 +1609,7 @@ static void match_saved (const char *type_str) {
 static void save_line (void) {
   debug ("saving line");
   COPY (int, saved, line);
+  start_of_saved = file->start_of_line;
 }
 
 static bool match_header (const char *expected) {
@@ -1773,7 +1818,7 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'v') {
-      consistent_line ();
+      consistent_line (type);
       save_line ();
       goto PROOF_VALUES;
     } else {
@@ -1786,9 +1831,8 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'v') {
-      consistent_line ();
-      superset_saved ();
-      check_model ();
+      consistent_line (type);
+      check_model (type);
       goto INTERACTION_INPUT;
     } else {
       unexpected_line (type, "'v'");
@@ -1800,7 +1844,7 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'j') {
-      consistent_line ();
+      consistent_line (type);
       save_line ();
       goto PROOF_JUSTIFY;
     } else {
@@ -1813,8 +1857,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'j') {
-      consistent_line ();
-      subset_saved ();
+      consistent_line (type);
       justify_core ();
       goto INTERACTION_INPUT;
     } else {

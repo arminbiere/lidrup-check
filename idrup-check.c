@@ -1341,12 +1341,12 @@ IMPLICATION_CHECK_SUCCEEDED:
 // marked and active (not weakened).  This could be sped
 
 static void mark_literal (int lit) {
-  debug ("marking %s", debug_literal (lit));
+  // debug ("marking %s", debug_literal (lit));
   marks[lit] = true;
 }
 
 static void unmark_literal (int lit) {
-  debug ("unmarking %s", debug_literal (lit));
+  // debug ("unmarking %s", debug_literal (lit));
   marks[lit] = false;
 }
 
@@ -1478,9 +1478,9 @@ static void check_satisfied_clause (int type, struct clause *c) {
   fflush (stdout);
   fprintf (stderr,
            "idrup-check: error: model at line %zu in '%s' "
-	   "does not satisfy %s clause:\n",
-	   file->start_of_line, file->name,
-	   c->input ? "input" : "derived"); // Defensive!!!
+           "does not satisfy %s clause:\n",
+           file->start_of_line, file->name,
+           c->input ? "input" : "derived"); // Defensive!!!
   fputc (c->input ? 'i' : 'l', stderr);
   for (all_literals (lit, c))
     fprintf (stderr, " %d", lit);
@@ -1493,16 +1493,17 @@ static void check_model (int type) {
   mark_line ();
   for (all_elements (int, lit, saved))
     if (marks[-lit])
-      line_error (type, "value %d inconsistent with line %zu in '%s'", lit,
-                  start_of_saved, other_file->name);
+      check_error (
+          "value %d in 'v' line inconsistent with line %zu in '%s'", lit,
+          start_of_saved, other_file->name);
   for (all_pointers (struct clause, c, deleted_input_clauses))
     check_satisfied_clause (type, c);
   for (int lit = -max_var; lit <= max_var; lit++)
     if (lit) {
-      struct clauses * watches = matrix + lit;
+      struct clauses *watches = matrix + lit;
       for (all_pointers (struct clause, c, *watches))
-	if (c->input && !c->weakened)
-	  check_satisfied_clause (type, c);
+        if (c->input && !c->weakened)
+          check_satisfied_clause (type, c);
     }
   unmark_line ();
   statistics.conclusions++;

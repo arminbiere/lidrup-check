@@ -139,7 +139,38 @@ static const char *string;
 
 /*------------------------------------------------------------------------*/
 
-static unsigned level;
+// Checker state.
+
+static unsigned level; // Decision level.
+
+static int max_var;      // Maximum variable index imported.
+static size_t allocated; // Allocated variables.
+
+static bool *imported;         // Variable index imported?
+static unsigned *levels;       // Decision level of assigned variables.
+static struct clauses *matrix; // Mapping literals to watcher stacks.
+static signed char *values;    // Assignment of literal: -1,0,1.
+static bool *marks;            // Marks of literals.
+
+// Default preallocated trail.
+
+static struct {
+  int *begin, *end;
+  int *units, *propagate;
+} trail;
+
+// Maps decision level to trail heights.
+
+static struct { int **begin, **end; } control;
+
+static bool inconsistent; // Empty clause derived.
+static bool failed;       // Failed assumption found.
+
+// Need to store empty clauses and deleted input clauses on seperate stacks
+// as they are not watched but still needed.
+
+static struct clauses empty_clauses;
+static struct clauses deleted_input_clauses;
 
 /*------------------------------------------------------------------------*/
 
@@ -239,6 +270,21 @@ static struct {
   } while (0)
 
 /*------------------------------------------------------------------------*/
+
+// Iterator for the literals of clauses.
+
+#define begin_literals(C) ((C)->lits)
+
+#define end_literals(C) (begin_literals (C) + (C)->size)
+
+#define all_literals(LIT, C) \
+  int LIT, *P_##LIT = begin_literals (C), *END_##LIT = end_literals (C); \
+  P_##LIT != END_##LIT && (LIT = *P_##LIT, true); \
+  P_##LIT++
+
+/*------------------------------------------------------------------------*/
+
+// Messages and errors.
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
@@ -602,36 +648,6 @@ static void unexpected_line (int type, const char *expected) {
 
 /*------------------------------------------------------------------------*/
 
-#define begin_literals(C) ((C)->lits)
-
-#define end_literals(C) (begin_literals (C) + (C)->size)
-
-#define all_literals(LIT, C) \
-  int LIT, *P_##LIT = begin_literals (C), *END_##LIT = end_literals (C); \
-  P_##LIT != END_##LIT && (LIT = *P_##LIT, true); \
-  P_##LIT++
-
-static int max_var;
-static size_t allocated;
-
-static struct clauses *matrix;
-static signed char *values;
-static signed char *marks;
-static unsigned *levels;
-static bool *imported;
-
-static struct {
-  int *begin, *end;
-  int *units, *propagate;
-} trail;
-
-static struct { int **begin, **end; } control;
-
-static bool failed;
-static bool inconsistent;
-static struct clauses empty_clauses;
-static struct clauses deleted_input_clauses;
-
 static void increase_allocated (int idx) {
   assert ((unsigned) idx >= allocated);
   size_t new_allocated = allocated ? 2 * allocated : 1;
@@ -666,7 +682,7 @@ static void increase_allocated (int idx) {
     values = new_values;
   }
   {
-    signed char *new_marks = calloc (2 * new_allocated, sizeof *new_marks);
+    bool *new_marks = calloc (2 * new_allocated, sizeof *new_marks);
     if (!new_marks)
       out_of_memory ("reallocating marks of size %zu", new_allocated);
     new_marks += new_allocated;
@@ -1256,12 +1272,12 @@ static void free_clause (struct clause *c) {
 
 static void mark_literal (int lit) {
   debug ("marking %s", debug_literal (lit));
-  marks[lit] = 1;
+  marks[lit] = true;
 }
 
 static void unmark_literal (int lit) {
   debug ("unmarking %s", debug_literal (lit));
-  marks[lit] = 0;
+  marks[lit] = false;
 }
 
 static void mark_line (void) {

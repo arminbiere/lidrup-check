@@ -1480,7 +1480,7 @@ static void restore_clause (struct clause *c) {
   statistics.restored++;
 }
 
-static void consistent_line (int type) {
+static void check_consistent_line (int type) {
   for (all_elements (int, lit, line)) {
     if (marks[-lit])
       check_error ("inconsistent '%d' line with both %d and %d", type, -lit,
@@ -1488,6 +1488,15 @@ static void consistent_line (int type) {
     marks[lit] = true;
   }
   unmark_line ();
+  debug ("line consists of consistent literals");
+}
+
+static void check_consistent_saved (int type) {
+  for (all_elements (int, lit, saved))
+    if (marks[-lit])
+      check_error ("inconsistent '%d' line on %d with line %zu in '%s'",
+                   type, lit, start_of_saved, other_file->name);
+  debug ("current and saved line have consistent literals");
 }
 
 static void check_satisfied_clause (int type, struct clause *c) {
@@ -1724,8 +1733,8 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line ('i');
     if (type == 'i') {
-      import_add_input ();
       save_line ();
+      import_add_input ();
       goto PROOF_INPUT;
     } else if (type == 'q') {
       save_line ();
@@ -1837,7 +1846,7 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'v') {
-      consistent_line (type);
+      check_consistent_line (type);
       save_line ();
       goto PROOF_VALUES;
     } else {
@@ -1850,7 +1859,8 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'v') {
-      consistent_line (type);
+      check_consistent_line (type);
+      check_consistent_saved (type);
       check_model (type);
       goto INTERACTION_INPUT;
     } else {
@@ -1863,7 +1873,7 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'j') {
-      consistent_line (type);
+      check_consistent_line (type);
       save_line ();
       goto PROOF_JUSTIFY;
     } else {
@@ -1876,7 +1886,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'j') {
-      consistent_line (type);
+      check_consistent_line (type);
       justify_core (type);
       goto INTERACTION_INPUT;
     } else {

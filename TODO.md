@@ -1,7 +1,7 @@
 TODO
 ----
 
-- implement justification checker
+- complete justification checker (check for superset)
 - produce occasionally empty clauses in fuzzer
 - interleave fuzzing with simplification occasionally
 - add tests for full coverage of error messages

@@ -189,6 +189,9 @@ struct ints {
       PUSH (DST, E); \
   } while (0)
 
+#define MIN(A,B) \
+  ((A) < (B) ? (A) : (B))
+
 struct file {
   FILE *file;
   const char *name;      // Actual path to this file.
@@ -583,14 +586,102 @@ static unsigned *levels;
 static bool *imported;
 
 static struct {
-  int *begin, *end, *allocated;
-  unsigned propagate, units;
+  int *begin, *end;
+  int *units, *assumptions, *propagate;
 } trail;
 
 static bool failed;
 static bool inconsistent;
 static struct clauses empty_clauses;
 static struct clauses deleted_input_clauses;
+
+static void increase_allocated (int idx) {
+  assert ((unsigned) idx >= allocated);
+  size_t new_allocated = allocated ? 2 * allocated : 1;
+  while ((unsigned) idx >= new_allocated)
+    new_allocated *= 2;
+  debug ("reallocating from %zu to %zu variables", allocated,
+         new_allocated);
+  {
+    struct clauses *new_matrix =
+        calloc (2 * new_allocated, sizeof *new_matrix);
+    if (!new_matrix)
+      out_of_memory ("reallocating matrix of size %zu", new_allocated);
+    new_matrix += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_matrix[lit] = matrix[lit];
+    matrix -= allocated;
+    free (matrix);
+    matrix = new_matrix;
+  }
+  {
+    signed char *new_values =
+        calloc (2 * new_allocated, sizeof *new_values);
+    if (!new_values)
+      out_of_memory ("reallocating values of size %zu", new_allocated);
+    new_values += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_values[lit] = values[lit];
+    values -= allocated;
+    free (values);
+    values = new_values;
+  }
+  {
+    signed char *new_marks = calloc (2 * new_allocated, sizeof *new_marks);
+    if (!new_marks)
+      out_of_memory ("reallocating marks of size %zu", new_allocated);
+    new_marks += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_marks[lit] = marks[lit];
+    marks -= allocated;
+    free (marks);
+    marks = new_marks;
+  }
+  {
+    unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
+    if (!new_levels)
+      out_of_memory ("reallocating levels of size %zu", new_allocated);
+    for (int idx = 1; idx <= max_var; idx++)
+      new_levels[idx] = levels[idx];
+    free (levels);
+    levels = new_levels;
+  }
+  {
+    bool *new_imported = calloc (new_allocated, sizeof *new_imported);
+    if (!new_imported)
+      out_of_memory ("reallocating imported of size %zu", new_allocated);
+    for (int idx = 1; idx <= max_var; idx++)
+      new_imported[idx] = imported[idx];
+    free (imported);
+    imported = new_imported;
+  }
+  {
+    size_t size = SIZE (trail);
+    size_t units = trail.units - trail.begin;
+    size_t assumptions = trail.assumptions - trail.begin;
+    size_t propagated = trail.propagate - trail.begin;
+    trail.begin =
+        realloc (trail.begin, new_allocated * sizeof *trail.begin);
+    if (!trail.begin)
+      out_of_memory ("reallocating trail of size %zu", new_allocated);
+    trail.end = trail.begin + size;
+    trail.units = trail.begin + units;
+    trail.propagate = trail.begin + propagated;
+    trail.assumptions = trail.begin + assumptions;
+    allocated = new_allocated;
+  }
+}
+
+static void increase_max_var (int idx) {
+  assert (max_var < idx);
+  debug ("new maximum variable index %d", idx);
+  if ((unsigned) idx >= allocated)
+    increase_allocated (idx);
+  max_var = idx;
+}
 
 static void import_literal (int lit) {
   assert (lit);
@@ -600,61 +691,8 @@ static void import_literal (int lit) {
     return;
   if (idx == INT_MAX)
     parse_error ("can not handle INT_MAX variables");
-  if (idx > max_var) {
-    debug ("new maximum variable index %d", idx);
-    if ((unsigned) idx >= allocated) {
-      size_t new_allocated = allocated ? 2 * allocated : 1;
-      while ((unsigned) idx >= new_allocated)
-        new_allocated *= 2;
-      debug ("reallocating from %zu to %zu variables", allocated,
-             new_allocated);
-
-      struct clauses *new_matrix =
-          calloc (2 * new_allocated, sizeof *new_matrix);
-      new_matrix += new_allocated;
-      if (max_var)
-        for (int lit = -max_var; lit <= max_var; lit++)
-          new_matrix[lit] = matrix[lit];
-      matrix -= allocated;
-      free (matrix);
-      matrix = new_matrix;
-
-      signed char *new_values =
-          calloc (2 * new_allocated, sizeof *new_values);
-      new_values += new_allocated;
-      if (max_var)
-        for (int lit = -max_var; lit <= max_var; lit++)
-          new_values[lit] = values[lit];
-      values -= allocated;
-      free (values);
-      values = new_values;
-
-      signed char *new_marks =
-          calloc (2 * new_allocated, sizeof *new_marks);
-      new_marks += new_allocated;
-      if (max_var)
-        for (int lit = -max_var; lit <= max_var; lit++)
-          new_marks[lit] = marks[lit];
-      marks -= allocated;
-      free (marks);
-      marks = new_marks;
-
-      unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
-      for (int idx = 1; idx <= max_var; idx++)
-        new_levels[idx] = levels[idx];
-      free (levels);
-      levels = new_levels;
-
-      bool *new_imported = calloc (new_allocated, sizeof *new_imported);
-      for (int idx = 1; idx <= max_var; idx++)
-        new_imported[idx] = imported[idx];
-      free (imported);
-      imported = new_imported;
-
-      allocated = new_allocated;
-    }
-    max_var = idx;
-  }
+  if (idx > max_var)
+    increase_max_var (idx);
   if (!imported[idx]) {
     imported[idx] = true;
     statistics.imported++;
@@ -732,13 +770,16 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   } while (false)
 #endif
 
-static void assign_unit (int lit) {
-  PUSH (trail, lit);
+static void assign_root_level_units (int lit) {
+  assert (!level);
+  assert (trail.end == trail.units);
+  *trail.end++ = lit;
+  trail.units++;
   values[-lit] = -1;
   values[lit] = 1;
-  levels[abs (lit)] = level;
+  int idx = abs (lit);
+  levels[idx] = 0;
   debug ("assigning %s as unit", debug_literal (lit));
-  trail.units++;
 }
 
 static void watch_literal (int lit, struct clause *c) {
@@ -768,19 +809,20 @@ static void backtrack (unsigned new_level) {
   while (trail.end > trail.begin) {
     int lit = trail.end[-1];
     assert (values[lit] > 0);
-    if (levels[abs (lit)] <= new_level)
+    int idx = abs (lit);
+    if (levels[idx] <= new_level)
       break;
 #ifndef NDEBUG
-    level = levels[abs (lit)];
+    level = levels[idx];
     debug ("unassigning %s", debug_literal (lit));
 #endif
     assert (values[lit] > 0);
     values[lit] = values[-lit] = 0;
     trail.end--;
   }
-  size_t new_trail_size = SIZE (trail);
-  assert (trail.units <= new_trail_size);
-  trail.propagate = new_trail_size;
+  assert (trail.units <= trail.end);
+  trail.assumptions = MIN (trail.assumptions, trail.end);
+  trail.propagate = MIN (trail.propagate, trail.end);
   level = new_level;
 }
 
@@ -815,7 +857,8 @@ static int move_best_watch_to_front (int *lits, const int *const end) {
     for (int *p = lits + 1; p != end; p++) {
       int lit = *p;
       signed char lit_value = values[lit];
-      unsigned lit_level = levels[abs (lit)];
+      int idx = abs (lit);
+      unsigned lit_level = levels[idx];
       if (!lit_value || watch_level < lit_level ||
           (watch_level == lit_level && watch_value < lit_value)) {
         *p = watch;
@@ -848,8 +891,10 @@ static void watch_clause (struct clause *c) {
       debug ("second watch %s not falsified", debug_literal (lit1));
     else {
       signed char val0 = values[lit0];
-      unsigned level0 = levels[abs (lit0)];
-      unsigned level1 = levels[abs (lit1)];
+      int idx0 = abs (lit0);
+      int idx1 = abs (lit1);
+      unsigned level0 = levels[idx0];
+      unsigned level1 = levels[idx1];
       if (level1 && (val0 <= 0 || level0 > level1)) {
 #ifndef NDEBUG
         if (val0 <= 0)
@@ -877,7 +922,8 @@ static int find_unit (struct clause *c, bool *satisfied, bool *falsified) {
   int unit = 0;
   for (all_literals (lit, c)) {
     signed char value = values[lit];
-    if (value && levels[abs (lit)])
+    int idx = abs (lit);
+    if (value && levels[idx])
       value = 0;
     if (value > 0) {
       *satisfied = true;
@@ -905,7 +951,7 @@ static void add_clause (bool input) {
       debug_clause (c, "added root-level unit");
       backtrack (0);
     }
-    assign_unit (unit);
+    assign_root_level_units (unit);
   } else if (!falsified)
     debug_clause (c, "added");
   else if (c->size) {
@@ -957,21 +1003,23 @@ static void save_query (void) {
   reset_checker ();
 }
 
-static void assign_propagated (int lit, struct clause *c) {
-  PUSH (trail, lit);
+static void assign_forced (int lit, struct clause *c) {
+  assert (trail.end != trail.begin + max_var);
+  *trail.end++ = lit;
   values[-lit] = -1;
   values[lit] = 1;
-  levels[abs (lit)] = level;
+  int idx = abs (lit);
+  levels[idx] = level;
   debug_clause (c, "assigning %s forced by", debug_literal (lit));
   (void) c;
 }
 
 static bool propagate (void) {
   assert (!inconsistent);
-  assert (trail.propagate <= SIZE (trail));
+  assert (trail.propagate <= trail.end);
   bool res = true;
-  while (res && trail.propagate != SIZE (trail)) {
-    int lit = trail.begin[trail.propagate++];
+  while (res && trail.propagate != trail.end) {
+    int lit = *trail.propagate++;
     debug ("propagating %s", debug_literal (lit));
     statistics.propagations++;
     int not_lit = -lit;
@@ -1006,7 +1054,7 @@ static bool propagate (void) {
         watch_literal (replacement, c);
         q--;
       } else if (!other_watch_value)
-        assign_propagated (other_watch, c);
+        assign_forced (other_watch, c);
       else {
         assert (other_watch_value < 0);
         debug_clause (c, "conflict");
@@ -1021,21 +1069,25 @@ static bool propagate (void) {
 }
 
 static void assign_decision (int lit) {
+  assert (trail.end != trail.begin + max_var);
+  *trail.end++ = lit;
   level++;
-  PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
-  levels[abs (lit)] = level;
+  int idx = abs (lit);
+  levels[idx] = level;
   statistics.decisions++;
   debug ("assigning %s as decision", debug_literal (lit));
 }
 
 static void assign_assumption (int lit) {
+  assert (trail.end != trail.begin + max_var);
+  *trail.end++ = lit;
   level++;
-  PUSH (trail, lit);
   values[-lit] = -1;
   values[lit] = 1;
-  levels[abs (lit)] = level;
+  int idx = abs (lit);
+  levels[idx] = level;
   statistics.decisions++;
   debug ("assigning %s as assumption", debug_literal (lit));
 }
@@ -1619,7 +1671,7 @@ static void release (void) {
     release_watches ();
   release_empty_clauses ();
   release_deleted_input_clauses ();
-  RELEASE (trail);
+  free (trail.begin);
   matrix -= allocated;
   free (matrix);
   values -= allocated;

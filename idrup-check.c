@@ -194,6 +194,20 @@ static struct {
 
 /*------------------------------------------------------------------------*/
 
+// Buffers for printing literals when logging ('debug_literal').
+
+#ifndef NDEBUG
+
+#define capacity_debug_buffer 2
+#define debug_buffer_line_size 64
+
+static char debug_buffer[capacity_debug_buffer][debug_buffer_line_size];
+static size_t next_debug_buffer_position;
+
+#endif
+
+/*------------------------------------------------------------------------*/
+
 // Generic stack implementation (similar to 'std::vector').
 
 #define BEGIN(S) (S).begin
@@ -442,12 +456,55 @@ static void debug_print_parsed_line (int type) {
   fflush (stdout);
 }
 
-#else
+static char *next_debug_buffer (void) {
+  char *res = debug_buffer[next_debug_buffer_position++];
+  if (next_debug_buffer_position == capacity_debug_buffer)
+    next_debug_buffer_position = 0;
+  return res;
+}
 
+static const char *debug_literal (int lit) {
+  char *res = next_debug_buffer ();
+  int value = values[lit];
+  if (value)
+    snprintf (res, debug_buffer_line_size, "%d@%u=%d", lit,
+              levels[abs (lit)], value);
+  else
+    snprintf (res, debug_buffer_line_size, "%d", lit);
+  return res;
+}
+
+static void debug_clause (struct clause *, const char *, ...)
+    __attribute__ ((format (printf, 2, 3)));
+
+static void debug_clause (struct clause *c, const char *fmt, ...) {
+  if (verbosity < INT_MAX)
+    return;
+  printf ("c DEBUG %u ", level);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  if (c->weakened)
+    fputs (" weakened", stdout);
+  if (c->input)
+    fputs (" input", stdout);
+  else
+    fputs (" lemma", stdout);
+  printf (" size %u line %zu clause[%zu]", c->size, c->lineno, c->id);
+  for (all_literals (lit, c))
+    printf (" %s", debug_literal (lit));
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
+#else
 #define debug(...) \
   do { \
-  } while (0)
-
+  } while (false)
+#define debug_clause(...) \
+  do { \
+  } while (false)
 #endif
 
 /*------------------------------------------------------------------------*/
@@ -772,62 +829,6 @@ static void literals_imported (void) {
   for (all_elements (int, lit, line))
     literal_imported (lit);
 }
-
-#ifndef NDEBUG
-
-#define capacity_debug_buffer 2
-#define debug_buffer_line_size 64
-
-static char debug_buffer[capacity_debug_buffer][debug_buffer_line_size];
-static size_t next_debug_buffer_position;
-
-static char *next_debug_buffer (void) {
-  char *res = debug_buffer[next_debug_buffer_position++];
-  if (next_debug_buffer_position == capacity_debug_buffer)
-    next_debug_buffer_position = 0;
-  return res;
-}
-
-static const char *debug_literal (int lit) {
-  char *res = next_debug_buffer ();
-  int value = values[lit];
-  if (value)
-    snprintf (res, debug_buffer_line_size, "%d@%u=%d", lit,
-              levels[abs (lit)], value);
-  else
-    snprintf (res, debug_buffer_line_size, "%d", lit);
-  return res;
-}
-
-static void debug_clause (struct clause *, const char *, ...)
-    __attribute__ ((format (printf, 2, 3)));
-
-static void debug_clause (struct clause *c, const char *fmt, ...) {
-  if (verbosity < INT_MAX)
-    return;
-  printf ("c DEBUG %u ", level);
-  va_list ap;
-  va_start (ap, fmt);
-  vprintf (fmt, ap);
-  va_end (ap);
-  if (c->weakened)
-    fputs (" weakened", stdout);
-  if (c->input)
-    fputs (" input", stdout);
-  else
-    fputs (" lemma", stdout);
-  printf (" size %u line %zu clause[%zu]", c->size, c->lineno, c->id);
-  for (all_literals (lit, c))
-    printf (" %s", debug_literal (lit));
-  fputc ('\n', stdout);
-  fflush (stdout);
-}
-
-#else
-#define debug_clause(...) \
-  do { \
-  } while (false)
-#endif
 
 static void push_trail (int lit) {
   assert (trail.end < trail.begin + max_var);

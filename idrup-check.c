@@ -38,6 +38,8 @@ static const char * idrup_check_usage =
 
 // clang-format on
 
+/*------------------------------------------------------------------------*/
+
 #include <assert.h>
 #include <ctype.h>
 #include <limits.h>
@@ -48,42 +50,9 @@ static const char * idrup_check_usage =
 #include <stdlib.h>
 #include <string.h>
 
-static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
+/*------------------------------------------------------------------------*/
 
-static void die (const char *fmt, ...) {
-  fputs ("idrup-check: error: ", stderr);
-  va_list ap;
-  va_start (ap, fmt);
-  vfprintf (stderr, fmt, ap);
-  va_end (ap);
-  fputc ('\n', stderr);
-  exit (1);
-}
-
-static void out_of_memory (const char *, ...)
-    __attribute__ ((format (printf, 1, 2)));
-
-static void fatal_error (const char *fmt, ...) {
-  fputs ("idrup-check: fatal internal error: ", stderr);
-  va_list ap;
-  va_start (ap, fmt);
-  vfprintf (stderr, fmt, ap);
-  va_end (ap);
-  fputc ('\n', stderr);
-  exit (1);
-}
-
-static void out_of_memory (const char *fmt, ...) {
-  fputs ("idrup-check: error: out-of-memory ", stderr);
-  va_list ap;
-  va_start (ap, fmt);
-  vfprintf (stderr, fmt, ap);
-  va_end (ap);
-  fputc ('\n', stderr);
-  exit (1);
-}
-
-static int verbosity = 0;
+// We support three different modes.
 
 enum {
   strict = 0,
@@ -91,32 +60,110 @@ enum {
   pedantic = 1,
 };
 
-static int mode = strict;
-
-static void message (const char *, ...)
-    __attribute__ ((format (printf, 1, 2)));
-
-static void message (const char *fmt, ...) {
-  if (verbosity < 0)
-    return;
-  fputs ("c ", stdout);
-  va_list ap;
-  va_start (ap, fmt);
-  vprintf (fmt, ap);
-  va_end (ap);
-  fputc ('\n', stdout);
-  fflush (stdout);
-}
-
-#define verbose(...) \
-  do { \
-    if (verbosity >= 1) \
-      message (__VA_ARGS__); \
-  } while (0)
+// Generic integer stack for literals.
 
 struct ints {
   int *begin, *end, *allocated;
 };
+
+// We are reading interleaved from two files in parallel.
+
+struct file {
+  FILE *file;
+  const char *name;      // Actual path to this file.
+  size_t lines;          // Proof lines read from this file.
+  size_t lineno;         // Line number of lines parsed so far.
+  size_t charno;         // Number of bytes parsed.
+  size_t start_of_line;  // Line number of current proof line.
+  size_t end_buffer;     // End of remaining characters in buffer.
+  size_t size_buffer;    // Current position (bytes parsed) in buffer.
+  bool end_of_file;      // Buffer 'read-char' detected end-of-file.
+  char last_char;        // Last char used to bump 'lineno'.
+  char buffer[1u << 20]; // The actual buffer (1MB).
+};
+
+struct clause {
+#ifndef NDEBUG
+  size_t id;
+  size_t lineno;
+#endif
+  unsigned size;
+  bool weakened;
+  bool input;
+  int lits[];
+};
+
+struct clauses {
+  struct clause **begin, **end, **allocated;
+};
+
+/*------------------------------------------------------------------------*/
+
+// Global options.
+
+static int verbosity = 0;
+
+static int mode = strict;
+
+/*------------------------------------------------------------------------*/
+
+// Section of parsing state.
+
+// Array of two files statically allocated and initialized.
+
+static struct file files[2] = {{.lineno = 1}, {.lineno = 1}};
+
+// The actual interaction and proof files point into this array.
+
+static struct file *interactions = files + 0;
+static struct file *proof = files + 1;
+
+// The current file from which we read (is set with 'set_file').
+
+static struct file *file;
+
+static struct ints line;  // Current line of integers parsed.
+static struct ints saved; // Saved line for checking.
+static struct ints query; // Saved query for checking.
+
+// Constant strings parsed in 'p' and 's' lines.
+
+static const char *const SATISFIABLE = "SATISFIABLE";
+static const char *const UNSATISFIABLE = "UNSATISFIABLE";
+static const char *const ICNF = "icnf";
+static const char *const IDRUP = "idrup";
+
+// The parser saves such strings here.
+
+static const char *string;
+
+/*------------------------------------------------------------------------*/
+
+static unsigned level;
+
+/*------------------------------------------------------------------------*/
+
+// Global statistics
+
+static struct {
+  size_t added;
+  size_t conclusions;
+  size_t decisions;
+  size_t deleted;
+  size_t inputs;
+  size_t imported;
+  size_t justifications;
+  size_t lemmas;
+  size_t models;
+  size_t propagations;
+  size_t queries;
+  size_t restored;
+  size_t weakened;
+} statistics;
+
+/*------------------------------------------------------------------------*/
+
+// Generic stack implementation (similar to 'std::vector').
 
 #define BEGIN(S) (S).begin
 #define END(S) (S).end
@@ -191,71 +238,63 @@ struct ints {
       PUSH (DST, E); \
   } while (0)
 
-struct file {
-  FILE *file;
-  const char *name;      // Actual path to this file.
-  size_t lines;          // Proof lines read from this file.
-  size_t lineno;         // Line number of lines parsed so far.
-  size_t charno;         // Number of bytes parsed.
-  size_t start_of_line;  // Line number of current proof line.
-  size_t end_buffer;     // End of remaining characters in buffer.
-  size_t size_buffer;    // Current position (bytes parsed) in buffer.
-  bool end_of_file;      // Buffer 'read-char' detected end-of-file.
-  char last_char;        // Last char used to bump 'lineno'.
-  char buffer[1u << 20]; // The actual buffer (1MB).
-};
+/*------------------------------------------------------------------------*/
 
-// Array of two files statically allocated and initialized.
+static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
-static struct file files[2] = {{.lineno = 1}, {.lineno = 1}};
-
-// The actual interaction and proof files point into this array.
-
-static struct file *interactions = files + 0;
-static struct file *proof = files + 1;
-
-// The current file from which we read (is set with 'set_file').
-
-static struct file *file;
-
-static struct ints line;  // Current line of integers parsed.
-static struct ints saved; // Saved line for checking.
-static struct ints query; // Saved query for checking.
-
-// Constant strings parsed in 'p' and 's' lines.
-
-static const char *const SATISFIABLE = "SATISFIABLE";
-static const char *const UNSATISFIABLE = "UNSATISFIABLE";
-static const char *const ICNF = "icnf";
-static const char *const IDRUP = "idrup";
-
-// The parser saves such strings here.
-
-static const char *string;
-
-static inline void set_file (struct file *new_file) {
-  assert (new_file);
-  assert (new_file->file);
-  file = new_file;
+static void die (const char *fmt, ...) {
+  fputs ("idrup-check: error: ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
 }
 
-static int read_char (void) {
-  assert (file);
-  assert (file->file);
-  if (file->size_buffer == file->end_buffer) {
-    if (file->end_of_file)
-      return EOF;
-    file->end_buffer =
-        fread (file->buffer, 1, sizeof file->buffer, file->file);
-    if (!file->end_buffer) {
-      file->end_of_file = 1;
-      return EOF;
-    }
-    file->size_buffer = 0;
-  }
-  assert (file->size_buffer < file->end_buffer);
-  return file->buffer[file->size_buffer++];
+static void out_of_memory (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void fatal_error (const char *fmt, ...) {
+  fputs ("idrup-check: fatal internal error: ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
 }
+
+static void out_of_memory (const char *fmt, ...) {
+  fputs ("idrup-check: error: out-of-memory ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
+}
+
+static void message (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void message (const char *fmt, ...) {
+  if (verbosity < 0)
+    return;
+  fputs ("c ", stdout);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
+
+#define verbose(...) \
+  do { \
+    if (verbosity >= 1) \
+      message (__VA_ARGS__); \
+  } while (0)
 
 static void parse_error (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
@@ -308,8 +347,6 @@ static void line_error (int type, const char *fmt, ...) {
   fputs (" 0\n", stderr);
   exit (1);
 }
-
-static unsigned level;
 
 #ifndef NDEBUG
 
@@ -366,6 +403,34 @@ static void debug_print_parsed_line (int type) {
   } while (0)
 
 #endif
+
+/*------------------------------------------------------------------------*/
+
+// Section on low-level line reading and partial parsing.
+
+static inline void set_file (struct file *new_file) {
+  assert (new_file);
+  assert (new_file->file);
+  file = new_file;
+}
+
+static int read_char (void) {
+  assert (file);
+  assert (file->file);
+  if (file->size_buffer == file->end_buffer) {
+    if (file->end_of_file)
+      return EOF;
+    file->end_buffer =
+        fread (file->buffer, 1, sizeof file->buffer, file->file);
+    if (!file->end_buffer) {
+      file->end_of_file = 1;
+      return EOF;
+    }
+    file->size_buffer = 0;
+  }
+  assert (file->size_buffer < file->end_buffer);
+  return file->buffer[file->size_buffer++];
+}
 
 static int next_char (void) {
   int res = read_char ();
@@ -535,32 +600,7 @@ static void unexpected_line (int type, const char *expected) {
     parse_error ("unexpected end-of-file (expected %s line)", expected);
 }
 
-static struct {
-  size_t added;
-  size_t conclusions;
-  size_t decisions;
-  size_t deleted;
-  size_t inputs;
-  size_t imported;
-  size_t justifications;
-  size_t lemmas;
-  size_t models;
-  size_t propagations;
-  size_t queries;
-  size_t restored;
-  size_t weakened;
-} statistics;
-
-struct clause {
-#ifndef NDEBUG
-  size_t id;
-  size_t lineno;
-#endif
-  unsigned size;
-  bool weakened;
-  bool input;
-  int lits[];
-};
+/*------------------------------------------------------------------------*/
 
 #define begin_literals(C) ((C)->lits)
 
@@ -570,10 +610,6 @@ struct clause {
   int LIT, *P_##LIT = begin_literals (C), *END_##LIT = end_literals (C); \
   P_##LIT != END_##LIT && (LIT = *P_##LIT, true); \
   P_##LIT++
-
-struct clauses {
-  struct clause **begin, **end, **allocated;
-};
 
 static int max_var;
 static size_t allocated;

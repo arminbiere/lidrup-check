@@ -705,6 +705,8 @@ static void unexpected_line (int type, const char *expected) {
 
 /*------------------------------------------------------------------------*/
 
+// Increasing allocated size of variables and importing a variable.
+
 static void increase_allocated (int idx) {
   assert ((unsigned) idx >= allocated);
   size_t new_allocated = allocated ? 2 * allocated : 1;
@@ -822,13 +824,9 @@ static void import_literals (void) {
     import_literal (lit);
 }
 
-static void literal_imported (int lit) {}
+/*------------------------------------------------------------------------*/
 
-static void literals_imported (void) {
-  debug ("checking literals imported");
-  for (all_elements (int, lit, line))
-    literal_imported (lit);
-}
+// Update trail and control stack including the decision level.
 
 static void push_trail (int lit) {
   assert (trail.end < trail.begin + max_var);
@@ -868,6 +866,10 @@ static void pop_control (unsigned new_level) {
   control.end = control.begin + new_level;
   debug ("decreased decision level to %u", level);
 }
+
+/*------------------------------------------------------------------------*/
+
+// We have four contexts in which we assign variables.
 
 static void assign_root_level_unit (int lit) {
   assert (!level);
@@ -917,25 +919,9 @@ static void assign_assumption (int lit) {
   debug ("assign %s as assumption", debug_literal (lit));
 }
 
-static void watch_literal (int lit, struct clause *c) {
-  debug_clause (c, "watching %s in", debug_literal (lit));
-  PUSH (matrix[lit], c);
-}
+/*------------------------------------------------------------------------*/
 
-static void unwatch_literal (int lit, struct clause *c) {
-  debug_clause (c, "unwatching %s in", debug_literal (lit));
-  struct clauses *watches = matrix + lit;
-  REMOVE (struct clause *, *watches, c);
-}
-
-static void unwatch_clause (struct clause *c) {
-  if (c->size) {
-    unwatch_literal (c->lits[0], c);
-    if (c->size > 1)
-      unwatch_literal (c->lits[1], c);
-  } else
-    REMOVE (struct clause *, empty_clauses, c);
-}
+// Unassining variables is only done during backtracking.
 
 static void backtrack (unsigned new_level) {
   assert (!inconsistent);
@@ -962,6 +948,10 @@ static void backtrack (unsigned new_level) {
   pop_trail (new_trail_end);
 }
 
+/*------------------------------------------------------------------------*/
+
+// Clause allocation and deallocation.
+
 static struct clause *allocate_clause (bool input) {
   size_t size = SIZE (line);
   if (size > UINT_MAX)
@@ -984,6 +974,36 @@ static struct clause *allocate_clause (bool input) {
   debug_clause (c, "allocate");
   return c;
 }
+
+static void free_clause (struct clause *c) {
+  debug ("freeing clause at %p", (void *) c);
+  debug_clause (c, "free");
+  free (c);
+}
+
+/*------------------------------------------------------------------------*/
+
+static void watch_literal (int lit, struct clause *c) {
+  debug_clause (c, "watching %s in", debug_literal (lit));
+  PUSH (matrix[lit], c);
+}
+
+static void unwatch_literal (int lit, struct clause *c) {
+  debug_clause (c, "unwatching %s in", debug_literal (lit));
+  struct clauses *watches = matrix + lit;
+  REMOVE (struct clause *, *watches, c);
+}
+
+static void unwatch_clause (struct clause *c) {
+  if (c->size) {
+    unwatch_literal (c->lits[0], c);
+    if (c->size > 1)
+      unwatch_literal (c->lits[1], c);
+  } else
+    REMOVE (struct clause *, empty_clauses, c);
+}
+
+/*------------------------------------------------------------------------*/
 
 static int move_best_watch_to_front (int *lits, const int *const end) {
   int watch = *lits;
@@ -1054,7 +1074,7 @@ static void watch_clause (struct clause *c) {
   }
 }
 
-static int find_unit (struct clause *c, bool *satisfied, bool *falsified) {
+static int simplify_clause (struct clause *c, bool *satisfied, bool *falsified) {
   int unit = 0;
   for (all_literals (lit, c)) {
     signed char value = values[lit];
@@ -1079,7 +1099,7 @@ static void add_clause (bool input) {
   struct clause *c = allocate_clause (input);
   watch_clause (c);
   bool satisfied = false, falsified = false;
-  int unit = find_unit (c, &satisfied, &falsified);
+  int unit = simplify_clause (c, &satisfied, &falsified);
   if (satisfied)
     debug_clause (c, "added root-level satisfied");
   else if (unit) {
@@ -1265,12 +1285,6 @@ IMPLICATION_CHECK_SUCCEEDED:
   debug ("implication check succeeded");
 }
 
-static void free_clause (struct clause *c) {
-  debug ("freeing clause at %p", (void *) c);
-  debug_clause (c, "free");
-  free (c);
-}
-
 static void mark_literal (int lit) {
   debug ("marking %s", debug_literal (lit));
   marks[lit] = true;
@@ -1388,6 +1402,18 @@ static void consistent_line (void) { debug ("checking consistency"); }
 static void subset_saved (void) { debug ("checking subset saved"); }
 
 static void superset_saved (void) { debug ("checking superset saved"); }
+
+static void literal_imported (int lit) {}
+
+static void literals_imported (void) {
+  debug ("checking literals imported");
+  for (all_elements (int, lit, line))
+    literal_imported (lit);
+}
+
+/*------------------------------------------------------------------------*/
+
+// Merged checking options for each line.
 
 static void import_add_input (void) {
   import_literals ();

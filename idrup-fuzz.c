@@ -268,7 +268,7 @@ static void fuzz (uint64_t seed) {
       if (!quiet)
 	fputc ('s', stdout), fflush (stdout);
       fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
-      fputc ('m', icnf);
+      fputc ('v', icnf);
       unsigned values = pick (&rng, 0, vars);
       for (unsigned i = 0; i != values; i++) {
         int lit = pick (&rng, 1, vars);
@@ -281,11 +281,11 @@ static void fuzz (uint64_t seed) {
 	fputc ('u', stdout), fflush (stdout);
       assert (res == 20);
       fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
-      fputc ('f', icnf);
+      fputc ('u', icnf); // TODO what about 'f'?
       for (unsigned j = 0; j != k; j++) {
 	int lit = query[j];
-	int failed = ccadical_failed (solver, lit) ? -lit : lit;
-	fprintf (icnf, " %d", failed);
+	if (ccadical_failed (solver, lit))
+	  fprintf (icnf, " %d", lit);
 	concluded = true;
       }
     }

@@ -428,7 +428,7 @@ int main (int argc, char **argv) {
       }
     }
   }
-  msg ("IDrup Fuzzer Version 0.0");
+  msg ("IDRUP Fuzzer Version 0.0");
   msg ("using %s", ccadical_signature ());
   if (seeded)
     msg ("specified seed %" PRIu64, rng);

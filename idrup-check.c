@@ -1228,7 +1228,9 @@ static void save_query (void) {
 // are indeed reverse unit propagation (RUP) implied.  It is slightly more
 // complicated as it needs to care about units.
 
-static void check_lemma_implied () {
+static void check_implied (int type, const char * type_str, int sign) {
+
+  assert (sign == 1 || sign == -1);
 
   if (inconsistent) {
     debug ("skipping implication check as formula is inconsistent");
@@ -1248,8 +1250,9 @@ static void check_lemma_implied () {
   // After all root-level units have been propagated the negation of
   // all literals in the line as decision and propagate.
 
-  debug ("checking line is implied");
+  debug ("checking lemma line is implied");
   for (all_elements (int, lit, line)) {
+    lit *= sign;
     signed char value = values[lit];
     if (value < 0)
       continue;
@@ -1261,7 +1264,7 @@ static void check_lemma_implied () {
   }
 
   if (propagate ())
-    line_error ('l', "implication check failed:");
+    line_error (type, "%s implication check failed:", type_str);
 
 IMPLICATION_CHECK_SUCCEEDED:
 
@@ -1458,17 +1461,13 @@ static void check_model (int type) {
   debug ("model checked");
 }
 
-static void check_unsatisfiable_core_implied () {
-  // TODO
-}
-
 static void justify_unsatisfiable_core () {
   debug ("justifying unsatisfiable core");
-  check_unsatisfiable_core_implied ();
+  check_implied ('u', "unsatisfiable core", 1); // TODO should become '-1'.
   statistics.conclusions++;
   statistics.justifications++;
   reset_checker ();
-  debug ("core justified");
+  debug ("unsatisfiable core justified");
 }
 
 static void check_literal_imported (int type, int lit) {
@@ -1495,7 +1494,7 @@ static void import_add_input (void) {
 
 static void import_check_then_add_lemma () {
   import_literals ();
-  check_lemma_implied ();
+  check_implied ('l', "lemma", 1);
   add_clause (false);
   statistics.lemmas++;
 }

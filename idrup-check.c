@@ -23,7 +23,7 @@ static const char * idrup_check_usage =
 
 "The checker makes sure the interactions match the proof and all proof\n"
 "steps are justified. This is only the case though for the default\n"
-"'pedantic' and the 'strict' mode.  Checking is less strict in 'relaxed'\n"
+"'strict' and the 'pedantic' mode.  Checking is less strict in 'relaxed'\n"
 "mode where conclusion missing in the proof will be skipped.  Still the\n"
 "exit code will only be zero if all checks go through and thus the\n"
 "interactions are all checked.\n"
@@ -140,6 +140,7 @@ static struct ints query; // Saved query for checking.
 
 // When saving a line the type and start of the line is saved too.
 
+static size_t start_of_query;
 static size_t start_of_saved;
 static int saved_type;
 
@@ -198,11 +199,11 @@ static struct clauses input_clauses;
 static struct {
   size_t added;
   size_t conclusions;
+  size_t cores;
   size_t decisions;
   size_t deleted;
   size_t inputs;
   size_t imported;
-  size_t justifications;
   size_t lemmas;
   size_t models;
   size_t propagations;
@@ -869,7 +870,7 @@ static void pop_trail (int *new_end) {
   }
 }
 
-static void push_control () {
+static void push_control (void) {
   level++;
   debug ("increased decision level to %u", level);
   assert (control.end < control.end + max_var);
@@ -1225,6 +1226,7 @@ static void reset_checker (void) {
 static void save_query (void) {
   debug ("saving query");
   COPY (int, query, line);
+  start_of_query = file->start_of_line;
   statistics.queries++;
   reset_checker ();
 }
@@ -1454,7 +1456,7 @@ static void check_satisfied_clause (int type, struct clause *c) {
            "idrup-check: error: model at line %zu in '%s' "
            "does not satisfy %s clause:\n",
            file->start_of_line, file->name,
-           c->input ? "input" : "derived"); // Defensive!!!
+           c->input ? "input" : "derived"); // Defensive at this point!!!
   fputc (c->input ? 'i' : 'l', stderr);
   for (all_literals (lit, c))
     fprintf (stderr, " %d", lit);
@@ -1462,28 +1464,26 @@ static void check_satisfied_clause (int type, struct clause *c) {
   exit (1);
 }
 
-// A given model in the proof is checked to satisfy all input clauses.
+// A given model line is checked to satisfy all input clauses.
 
-static void check_model (int type) {
+static void check_line_satisfies_input_clauses (int type) {
   debug ("checking model");
   mark_line ();
   for (all_pointers (struct clause, c, input_clauses))
     check_satisfied_clause (type, c);
   unmark_line ();
-  statistics.conclusions++;
-  statistics.models++;
-  reset_checker (); // TODO needed?
   debug ("model checked");
 }
 
-static void justify_unsatisfiable_core () {
-  debug ("justifying unsatisfiable core");
-  check_implied ('u', "unsatisfiable core", 1);
-  statistics.conclusions++;
-  statistics.justifications++;
-  reset_checker ();
-  debug ("unsatisfiable core justified");
+// The given core line leads to unsatisfiability through propagation.
+
+static void check_line_propagation_yields_conflict (int type) {
+  debug ("checking unsatisfiable core implied");
+  check_implied (type, "unsatisfiable core", 1);
+  debug ("unsatisfiable core implied");
 }
+
+// Check that the given literal has been imported before.
 
 static void check_literal_imported (int type, int lit) {
   int idx = abs (lit);
@@ -1501,15 +1501,16 @@ static void check_literals_imported (int type) {
 
 // Merged checking options for each line.
 
-static void import_add_input (void) {
+static void import_and_add_input_clause (int type) {
   import_literals ();
   add_clause (true);
   statistics.inputs++;
+  (void) type;
 }
 
-static void import_check_then_add_lemma () {
+static void import_check_then_add_lemma (int type) {
   import_literals ();
-  check_implied ('l', "lemma", -1);
+  check_implied (type, "lemma", -1);
   add_clause (false);
   statistics.lemmas++;
 }
@@ -1558,11 +1559,13 @@ static void learn_delete_restore_or_weaken (int type) {
   }
 }
 
-static void match_saved (const char *type_str) {
+static void match_saved (int type, const char *type_str) {
   debug ("matching saved line");
   if (SIZE (line) != SIZE (saved))
   SAVED_LINE_DOES_NOT_MATCH:
-    check_error ("%s line does not match", type_str);
+    check_error ("%s '%c' line does not match '%c' line %zu in '%s'",
+                 type_str, type, saved_type, start_of_saved,
+                 other_file->name);
   const int *const end = saved.end;
   const int *p = saved.begin;
   const int *q = line.begin;
@@ -1591,6 +1594,53 @@ static bool match_header (const char *expected) {
                  expected, string);
   verbose ("found '%s' header in '%s'", string, file->name);
   return true;
+}
+
+static void check_line_satisfies_query (int type) {
+  mark_line ();
+  for (all_elements (int, lit, query))
+    if (!marks[lit])
+      check_error ("model does not satisfy query literal %d "
+                   "at line %zu in '%s'",
+                   lit, start_of_query, interactions->name);
+  unmark_line ();
+  (void) type;
+}
+
+static void conclude_satisfiable_query_with_model (int type) {
+  debug ("concluding satisfiable query");
+  assert (!inconsistent);
+  check_line_consistency (type);
+  check_line_satisfies_query (type);
+  check_line_satisfies_input_clauses (type);
+  check_line_consistent_with_saved (type);
+  statistics.conclusions++;
+  statistics.models++;
+  assert (!level);
+  debug ("satisfiable query concluded");
+}
+
+static void check_core_subset_of_query (int type) {
+  for (all_elements (int, lit, query))
+    marks[lit] = true;
+  for (all_elements (int, lit, line))
+    if (!marks[lit])
+      check_error ("core literal %d not in query at line %zu in '%s'", lit,
+                   start_of_query, interactions->name);
+  for (all_elements (int, lit, query))
+    marks[lit] = false;
+}
+
+static void conclude_unsatisfiable_query_with_core (int type) {
+  debug ("concluding satisfiable query");
+  check_line_propagation_yields_conflict (type);
+  assert (saved_type == 'u'); // TODO what about 'f'?
+  check_core_subset_of_query (type);
+  match_saved (type, "query");
+  statistics.conclusions++;
+  statistics.cores++;
+  assert (!level || inconsistent);
+  debug ("unsatisfiable query concluded");
 }
 
 /*------------------------------------------------------------------------*/
@@ -1631,8 +1681,8 @@ static int parse_and_check (void) {
   // checker can not guarantee the input clauses to be satisfied at this
   // point.
 
-  // For missing 'u' justification lines the checker might end up in
-  // a similar situation (in case the user claims a justification core
+  // For missing 'u' proof conclusion lines the checker might end up in
+  // a similar situation (in case the user claims an unsatisfiable core
   // which is not implied by unit propagation).  In these cases the
   // program continues without error but simply exit with exit code '2' to
   // denote that checking only partially.
@@ -1676,10 +1726,12 @@ static int parse_and_check (void) {
     int type = next_line ('i');
     if (type == 'i') {
       save_line (type);
-      import_add_input ();
+      import_and_add_input_clause (type);
       goto PROOF_INPUT;
     } else if (type == 'q') {
+      import_literals ();
       save_line (type);
+      save_query ();
       goto PROOF_QUERY;
     } else if (type == 0)
       goto END_OF_CHECKING;
@@ -1699,7 +1751,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i') {
-      match_saved ("input");
+      match_saved (type, "input");
       goto INTERACTION_INPUT;
     } else if (type == 'p') {
       if (match_header (IDRUP))
@@ -1720,9 +1772,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'q') {
-      match_saved ("query");
-      import_literals ();
-      save_query ();
+      match_saved (type, "query");
       goto PROOF_CHECK;
     } else if (type == 'p') {
       if (match_header (IDRUP))
@@ -1787,8 +1837,14 @@ static int parse_and_check (void) {
     STATE (INTERACTION_SATISFIED);
     set_file (interactions);
     int type = next_line (0);
-    if (type == 'v' || type == 'm') {
+    if (type == 'v') {
       check_line_consistency (type);
+      save_line (type);
+      goto PROOF_MODEL;
+    } else if (type == 'm') {
+      check_line_consistency (type);
+      check_line_satisfies_query (type);
+      check_line_satisfies_input_clauses (type);
       save_line (type);
       goto PROOF_MODEL;
     } else {
@@ -1801,9 +1857,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'm') {
-      check_line_consistency (type);
-      check_line_consistent_with_saved (type);
-      check_model (type);
+      conclude_satisfiable_query_with_model (type);
       goto INTERACTION_INPUT;
     } else {
       unexpected_line (type, "'m'");
@@ -1815,10 +1869,11 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'f') {
+      check_error ("'f' lines not support in interaction file yet");
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {
-      check_line_consistency (type);
+      check_line_propagation_yields_conflict (type);
       save_line (type);
       goto PROOF_CORE;
     } else {
@@ -1831,8 +1886,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'u') {
-      check_line_consistency (type);
-      justify_unsatisfiable_core (type);
+      conclude_unsatisfiable_query_with_core (type);
       goto INTERACTION_INPUT;
     } else {
       unexpected_line (type, "'u'");
@@ -1948,6 +2002,9 @@ static void print_statistics (void) {
   printf ("c %-20s %20zu %12.2f %% queries\n",
           "conclusions:", statistics.conclusions,
           percent (statistics.conclusions, statistics.queries));
+  printf ("c %-20s %20zu %12.2f %% conclusions\n",
+          "cores:", statistics.cores,
+          percent (statistics.cores, statistics.conclusions));
   printf ("c %-20s %20zu %12.2f per lemma\n",
           "decisions:", statistics.decisions,
           average (statistics.decisions, statistics.lemmas));
@@ -1955,9 +2012,6 @@ static void print_statistics (void) {
           percent (statistics.deleted, statistics.added));
   printf ("c %-20s %20zu %12.2f %% added\n", "inputs:", statistics.inputs,
           percent (statistics.inputs, statistics.added));
-  printf ("c %-20s %20zu %12.2f %% conclusions\n",
-          "justifications:", statistics.justifications,
-          percent (statistics.justifications, statistics.conclusions));
   printf ("c %-20s %20zu %12.2f %% added\n", "lemmas:", statistics.lemmas,
           percent (statistics.lemmas, statistics.added));
   printf ("c %-20s %20zu %12.2f %% conclusions\n",

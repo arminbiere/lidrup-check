@@ -1,5 +1,7 @@
 // clang-format off
+
 static const char * usage =
+
 "usage: idrup-fuzz [ <option> ... ] [ <number> [ <number> ] ]\n"
 "\n"
 "where '<option>' is one of the following two\n"
@@ -22,7 +24,9 @@ static const char * usage =
 "of repetitions.  If both are positive the second specifies the number\n"
 "of repetitions.  Two negative numbers are invalid.  With a single and\n"
 "positive number only the test for that seed is run.\n"
+
 "\n"
+
 "All numbers are assumed to be decimally encoded and parsed as 64-bit\n"
 "number in the range 0 to 2^64-1 (18446744073709551615).  If the number of\n"
 "repetitions is unspecified fuzzing runs without limit.  Without a seed\n"

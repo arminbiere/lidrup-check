@@ -176,11 +176,14 @@ static struct { int **begin, **end; } control;
 static bool inconsistent; // Empty clause derived.
 static bool failed;       // Failed assumption found.
 
-// Need to store empty clauses and deleted input clauses on separate stacks
-// as they are not watched but still needed.
+// Need to store empty clauses on a separate stack as they are not watched.
 
 static struct clauses empty_clauses;
-static struct clauses deleted_input_clauses;
+
+// Input clauses are never actually deleted as they are needed for checking
+// that models satisfy them.
+
+static struct clauses input_clauses;
 
 /*------------------------------------------------------------------------*/
 
@@ -984,6 +987,8 @@ static struct clause *allocate_clause (bool input) {
   c->input = input;
   memcpy (c->lits, line.begin, lits_bytes);
   debug_clause (c, "allocate");
+  if (input)
+    PUSH (input_clauses, c);
   return c;
 }
 
@@ -1302,10 +1307,10 @@ static void check_implied (int type) {
       } else {
         assert (!value);
         assign_assumption (assumption);
-	if (!propagate ()) {
-	  failed = true;
-	  goto IMPLICATION_CHECK_SUCCEEDED;
-	}
+        if (!propagate ()) {
+          failed = true;
+          goto IMPLICATION_CHECK_SUCCEEDED;
+        }
       }
     }
 
@@ -1441,10 +1446,9 @@ static void delete_clause (struct clause *c) {
   assert (!c->weakened);
   debug ("deleting clause");
   unwatch_clause (c);
-  if (c->input) {
-    debug_clause (c, "saving deleted");
-    PUSH (deleted_input_clauses, c);
-  } else
+  if (c->input)
+    debug_clause (c, "but not freeing");
+  else
     free_clause (c);
   statistics.deleted++;
 }
@@ -1480,7 +1484,9 @@ static void restore_clause (struct clause *c) {
   statistics.restored++;
 }
 
-// Check that there are no clashing literals in the current line.
+// Check that there are no clashing literals (both positive and negative
+// occurrence of a variable) in the current line.  This is a mandatory check
+// for conclusions, i.e., for both 'v' models and 'j' core lines.
 
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
@@ -1492,6 +1498,10 @@ static void check_line_consistency (int type) {
   unmark_line ();
   debug ("line consists of consistent literals");
 }
+
+// Check that there are no literals in the current line which clash with one
+// literal in the saved line (a variable is not allowed to occur positively
+// in one and negatively in the other line).
 
 static void check_line_consistent_with_saved (int type) {
   mark_line ();
@@ -1521,18 +1531,13 @@ static void check_satisfied_clause (int type, struct clause *c) {
   exit (1);
 }
 
+// A given model in the proof is checked to satisfy all input clauses.
+
 static void check_model (int type) {
   debug ("checking model");
   mark_line ();
-  for (all_pointers (struct clause, c, deleted_input_clauses))
+  for (all_pointers (struct clause, c, input_clauses))
     check_satisfied_clause (type, c);
-  for (int lit = -max_var; lit <= max_var; lit++)
-    if (lit) {
-      struct clauses *watches = matrix + lit;
-      for (all_pointers (struct clause, c, *watches))
-        if (c->input && !c->weakened)
-          check_satisfied_clause (type, c);
-    }
   unmark_line ();
   statistics.conclusions++;
   statistics.models++;
@@ -1923,6 +1928,8 @@ static void release_watches (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
+      if (c->input)
+	continue;		// Released separately.
       if (c->size < 2)
         free_clause (c);
       else {
@@ -1942,10 +1949,10 @@ static void release_empty_clauses (void) {
   RELEASE (empty_clauses);
 }
 
-static void release_deleted_input_clauses (void) {
-  for (all_pointers (struct clause, c, deleted_input_clauses))
+static void release_input_clauses (void) {
+  for (all_pointers (struct clause, c, input_clauses))
     free_clause (c);
-  RELEASE (deleted_input_clauses);
+  RELEASE (input_clauses);
 }
 
 static void release (void) {
@@ -1955,7 +1962,7 @@ static void release (void) {
   if (max_var)
     release_watches ();
   release_empty_clauses ();
-  release_deleted_input_clauses ();
+  release_input_clauses ();
   free (trail.begin);
   free (control.begin);
   matrix -= allocated;

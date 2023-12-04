@@ -318,7 +318,8 @@ static size_t next_debug_buffer_position;
 
 /*------------------------------------------------------------------------*/
 
-// Messages and errors.
+// Function to print messages and errors with nice formatting prototypes to
+// produce compiler warnings if arguments do not match format.
 
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 

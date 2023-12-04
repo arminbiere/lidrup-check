@@ -39,7 +39,13 @@ static const char * usage =
 
 // clang-format on
 
+/*------------------------------------------------------------------------*/
+
+// Depends on 'CaDiCaL' but goes through its C interface for simplicity.
+
 #include "ccadical.h"
+
+/*------------------------------------------------------------------------*/
 
 #include <assert.h>
 #include <ctype.h>
@@ -54,6 +60,33 @@ static const char * usage =
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+/*------------------------------------------------------------------------*/
+
+// Global configuration options.
+
+static bool quiet;        // Force not output if enabled.
+static bool small = true; // Only use a small set of variables.
+static bool terminal;     // Erase printed lines if connected to a terminal.
+static bool keep_going;   // Keep going even if 'idrup-check' failed.
+
+static volatile uint64_t repetitions; // Number of repetitions if specified.
+static bool limited = false;          // If repetitions limits this is set.
+
+/*------------------------------------------------------------------------*/
+
+static volatile bool completed; // Line completed.
+static volatile uint64_t fuzzed; // Number of fuzzed tests.
+
+/*------------------------------------------------------------------------*/
+
+// The picked number of variables for one test case.
+
+static unsigned vars;
+
+/*------------------------------------------------------------------------*/
+
+// Random number generation functions.
 
 static uint64_t next64 (uint64_t *rng) {
   uint64_t state = *rng;
@@ -81,31 +114,9 @@ static void hash (uint64_t value, uint64_t *state) {
   (void) next64 (state);
 }
 
-static void die (const char *fmt, ...) {
-  fputs ("idrup-fuzz: error: ", stderr);
-  va_list ap;
-  va_start (ap, fmt);
-  vfprintf (stderr, fmt, ap);
-  va_end (ap);
-  fputc ('\n', stderr);
-  exit (1);
-}
+/*------------------------------------------------------------------------*/
 
-static bool quiet;
-static bool small = true;
-
-static bool terminal;
-static bool keep_going;
-
-static void clear_to_end_of_line (void) {
-  if (!quiet && terminal)
-    fputs ("\033[K", stdout);
-}
-
-static void erase_line (void) {
-  if (!quiet && terminal)
-    fputs ("\033[1G", stdout);
-}
+// Functions to print messages and errors and handle terminal output.
 
 static void msg (const char *fmt, ...) {
   if (quiet)
@@ -117,6 +128,30 @@ static void msg (const char *fmt, ...) {
   fputc ('\n', stdout);
   fflush (stdout);
 }
+
+static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
+
+static void die (const char *fmt, ...) {
+  fputs ("idrup-fuzz: error: ", stderr);
+  va_list ap;
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
+  exit (1);
+}
+
+static void clear_to_end_of_line (void) {
+  if (!quiet && terminal)
+    fputs ("\033[K", stdout);
+}
+
+static void erase_line (void) {
+  if (!quiet && terminal)
+    fputs ("\033[1G", stdout);
+}
+
+/*------------------------------------------------------------------------*/
 
 static bool parse_uint64_t (const char *str, uint64_t *res_ptr) {
   if (!*str)
@@ -139,13 +174,7 @@ static bool parse_uint64_t (const char *str, uint64_t *res_ptr) {
   return true;
 }
 
-static volatile bool caught;
-static volatile bool completed;
-static void (*saved) (int);
-
-static volatile uint64_t fuzzed;
-static volatile uint64_t repetitions;
-static bool limited = false;
+/*------------------------------------------------------------------------*/
 
 static int min (int a, int b) { return a < b ? a : b; }
 static double average (double a, double b) { return b ? a / b : 0; }
@@ -159,6 +188,14 @@ static void statistics () {
     printf ("fuzzed %" PRIu64 " interactions\n", fuzzed);
   fflush (stdout);
 }
+
+/*------------------------------------------------------------------------*/
+
+// Signal handling (we only catch interrupts, i.e., '<control-c>').
+
+static volatile bool caught;    // Signal handled.
+
+static void (*saved) (int);     // Saved signal handler.
 
 static void catch (int sig) {
   if (caught)
@@ -177,6 +214,10 @@ static void catch (int sig) {
   raise (sig);
 }
 
+/*------------------------------------------------------------------------*/
+
+// Open and write to the given file.
+
 static FILE *write_to_file (const char *path) {
   FILE *file = fopen (path, "w");
   if (!file)
@@ -184,7 +225,7 @@ static FILE *write_to_file (const char *path) {
   return file;
 }
 
-static unsigned vars;
+// Generate a vector of literals (without repeated variables).
 
 static void pick_literals (uint64_t *rng, int *lits, unsigned size) {
   for (unsigned j = 0; j != size; j++) {
@@ -198,6 +239,8 @@ static void pick_literals (uint64_t *rng, int *lits, unsigned size) {
     lits[j] = lit;
   }
 }
+
+// The function which runs one fuzzing test.
 
 static void fuzz (uint64_t seed) {
   uint64_t rng = seed;
@@ -266,7 +309,7 @@ static void fuzz (uint64_t seed) {
     bool concluded = false;
     if (res == 10) {
       if (!quiet)
-	fputc ('s', stdout), fflush (stdout);
+        fputc ('s', stdout), fflush (stdout);
       fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
       fputc ('v', icnf);
       unsigned values = pick (&rng, 0, vars);
@@ -278,22 +321,22 @@ static void fuzz (uint64_t seed) {
       }
     } else {
       if (!quiet)
-	fputc ('u', stdout), fflush (stdout);
+        fputc ('u', stdout), fflush (stdout);
       assert (res == 20);
       fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
       fputc ('u', icnf); // TODO what about 'f'?
       for (unsigned j = 0; j != k; j++) {
-	int lit = query[j];
-	if (ccadical_failed (solver, lit))
-	  fprintf (icnf, " %d", lit);
-	concluded = true;
+        int lit = query[j];
+        if (ccadical_failed (solver, lit))
+          fprintf (icnf, " %d", lit);
+        concluded = true;
       }
     }
     fputs (" 0\n", icnf);
     fflush (icnf);
     (void) concluded;
     // if (!concluded) // TODO could make this optional.
-      ccadical_conclude (solver);
+    ccadical_conclude (solver);
   }
   ccadical_release (solver);
   fclose (icnf);
@@ -341,6 +384,8 @@ static void fuzz (uint64_t seed) {
   } else if (!quiet)
     fputs (" checked", stdout), fflush (stdout);
 }
+
+/*------------------------------------------------------------------------*/
 
 int main (int argc, char **argv) {
   bool seeded = false;

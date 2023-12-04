@@ -29,32 +29,32 @@ digraph "idrup-check" {
   INTERACTION_SATISFIABLE -> INTERACTION_SATISFIED [label=" s SATISFIABLE "];
 
   INTERACTION_SATISFIED [shape=box,label="INTERACTION_SATISFIED!"];
-  INTERACTION_SATISFIED -> PROOF_VALUES [label=" v "];
-  INTERACTION_SATISFIED -> PROOF_INPUT_OR_VALUES [label=" i "];
-  INTERACTION_SATISFIED -> PROOF_QUERY_OR_VALUES [label=" q ", color=orange3,fontsize=20,fontcolor=orange3];
-  INTERACTION_SATISFIED -> PROOF_VALUES_AND_END [label=" $ "];
+  INTERACTION_SATISFIED -> PROOF_MODEL [label=" v | m "];
+  INTERACTION_SATISFIED -> PROOF_INPUT_OR_MODEL [label=" i "];
+  INTERACTION_SATISFIED -> PROOF_QUERY_OR_MODEL [label=" q ", color=orange3,fontsize=20,fontcolor=orange3];
+  INTERACTION_SATISFIED -> PROOF_MODEL_AND_END [label=" $ "];
 
   INTERACTION_UNSATISFIED [shape=box,label="INTERACTION_UNSATISFIED!"];
-  INTERACTION_UNSATISFIED -> PROOF_JUSTIFY [label=" j "];
-  INTERACTION_UNSATISFIED -> PROOF_INPUT_OR_JUSTIFY [label=" i "];
-  INTERACTION_UNSATISFIED -> PROOF_QUERY_OR_JUSTIFY [label=" q ",color=orange3,fontsize=20,fontcolor=orange3];
-  INTERACTION_UNSATISFIED -> PROOF_JUSTIFY_AND_END [label=" $ "];
+  INTERACTION_UNSATISFIED -> PROOF_CORE [label=" f | u "];
+  INTERACTION_UNSATISFIED -> PROOF_INPUT_OR_CORE [label=" i "];
+  INTERACTION_UNSATISFIED -> PROOF_QUERY_OR_CORE [label=" q ",color=orange3,fontsize=20,fontcolor=orange3];
+  INTERACTION_UNSATISFIED -> PROOF_CORE_AND_END [label=" $ "];
 
-  PROOF_VALUES_AND_END -> "end-of-checking" [label=" v ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
-  PROOF_JUSTIFY_AND_END -> "end-of-checking" [label=" j ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_MODEL_AND_END -> "end-of-checking" [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_CORE_AND_END -> "end-of-checking" [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
 
-  PROOF_VALUES -> INTERACTION_INPUT [label=" v ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
-  PROOF_JUSTIFY -> INTERACTION_INPUT [label=" j ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_MODEL -> INTERACTION_INPUT [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_CORE -> INTERACTION_INPUT [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
 
-  PROOF_INPUT_OR_VALUES -> INTERACTION_INPUT [label=" i ",color=invis,fontcolor=invis];
-  PROOF_INPUT_OR_VALUES -> PROOF_INPUT [label=" v ", color=darkgreen,fontcolor=darkgreen,fontsize=20];
+  PROOF_INPUT_OR_MODEL -> INTERACTION_INPUT [label=" i ",color=invis,fontcolor=invis];
+  PROOF_INPUT_OR_MODEL -> PROOF_INPUT [label=" m ", color=darkgreen,fontcolor=darkgreen,fontsize=20];
 
-  PROOF_QUERY_OR_VALUES -> PROOF_QUERY [label=" v ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
-  PROOF_QUERY_OR_VALUES -> PROOF_CHECK [label=" q ",color=invis,fontcolor=invis];
+  PROOF_QUERY_OR_MODEL -> PROOF_QUERY [label=" m ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
+  PROOF_QUERY_OR_MODEL -> PROOF_CHECK [label=" q ",color=invis,fontcolor=invis];
 
-  PROOF_QUERY_OR_JUSTIFY -> PROOF_QUERY [label=" j ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
-  PROOF_QUERY_OR_JUSTIFY -> PROOF_CHECK [label=" q ",color=invis,fontcolor=invis];
+  PROOF_QUERY_OR_CORE -> PROOF_QUERY [label=" u ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
+  PROOF_QUERY_OR_CORE -> PROOF_CHECK [label=" q ",color=invis,fontcolor=invis];
 
-  PROOF_INPUT_OR_JUSTIFY -> PROOF_INPUT [label=" j ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
-  PROOF_INPUT_OR_JUSTIFY -> INTERACTION_INPUT [label=" i ",color=invis,fontcolor=invis];
+  PROOF_INPUT_OR_CORE -> PROOF_INPUT [label=" u ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
+  PROOF_INPUT_OR_CORE -> INTERACTION_INPUT [label=" i ",color=invis,fontcolor=invis];
 }

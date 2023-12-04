@@ -37,11 +37,11 @@ digraph "idrup-check" {
   INTERACTION_SATISFIABLE -> INTERACTION_SATISFIED [label=" s SATISFIABLE "];
 
   INTERACTION_SATISFIED [shape=box,label="INTERACTION_SATISFIED!"];
-  INTERACTION_SATISFIED -> PROOF_VALUES [label=" v "];
+  INTERACTION_SATISFIED -> PROOF_MODEL [label=" v | m "];
 
   INTERACTION_UNSATISFIED [shape=box,label="INTERACTION_UNSATISFIED!"];
-  INTERACTION_UNSATISFIED -> PROOF_JUSTIFY [label=" j "];
+  INTERACTION_UNSATISFIED -> PROOF_CORE [label=" f | u "];
 
-  PROOF_VALUES -> INTERACTION_INPUT [label=" v ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
-  PROOF_JUSTIFY -> INTERACTION_INPUT [label=" j ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_MODEL -> INTERACTION_INPUT [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_CORE -> INTERACTION_INPUT [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
 }

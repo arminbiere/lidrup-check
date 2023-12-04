@@ -1292,10 +1292,9 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 /*------------------------------------------------------------------------*/
 
-// Clauses are found by marking the literals in the line and then traversing
-// the watches of them to find all clause of the same size with all literals
-// marked and active (not weakened).  It might be possible to speed up this
-// part with hash table, which on the other hand would require more space.
+// We use a literal map which maps literals to true to mark literals in
+// 'line', 'saved' and 'query' which allows us to check set equivalence
+// ('match_literals') or subset properties ('subset_literals').
 
 static void mark_literal (int lit) {
   // debug ("marking %s", debug_literal (lit));
@@ -1307,15 +1306,51 @@ static void unmark_literal (int lit) {
   marks[lit] = false;
 }
 
-static void mark_line (void) {
-  for (all_elements (int, lit, line))
+static void mark_literals (struct ints *lits) {
+  for (all_elements (int, lit, *lits))
     mark_literal (lit);
 }
 
-static void unmark_line (void) {
-  for (all_elements (int, lit, line))
+static void unmark_literals (struct ints *lits) {
+  for (all_elements (int, lit, *lits))
     unmark_literal (lit);
 }
+
+static void mark_line (void) { mark_literals (&line); }
+static void unmark_line (void) { unmark_literals (&line); }
+
+#if 0
+
+static void mark_saved (void) { mark_literals (&saved); }
+static void unmark_saved (void) { unmark_literals (&saved); }
+
+#endif
+
+static void mark_query (void) { mark_literals (&query); }
+static void unmark_query (void) { unmark_literals (&query); }
+
+static bool subset_literals (struct ints *a, struct ints *b) {
+  mark_literals (b);
+  bool res = true;
+  for (all_elements (int, lit, *a))
+    if (!marks[lit]) {
+      res = false;
+      break;
+    }
+  unmark_literals (b);
+  return res;
+}
+
+static bool match_literals (struct ints *a, struct ints *b) {
+  return subset_literals (a, b) && subset_literals (b, a);
+}
+
+/*------------------------------------------------------------------------*/
+
+// Clauses are found by marking the literals in the line and then traversing
+// the watches of them to find all clause of the same size with all literals
+// marked and active (not weakened).  It might be possible to speed up this
+// part with hash table, which on the other hand would require more space.
 
 static struct clause *find_empty_clause (bool weakened) {
   assert (EMPTY (line));
@@ -1561,19 +1596,10 @@ static void learn_delete_restore_or_weaken (int type) {
 
 static void match_saved (int type, const char *type_str) {
   debug ("matching saved line");
-  if (SIZE (line) != SIZE (saved))
-  SAVED_LINE_DOES_NOT_MATCH:
+  if (!match_literals (&line, &saved))
     check_error ("%s '%c' line does not match '%c' line %zu in '%s'",
                  type_str, type, saved_type, start_of_saved,
                  other_file->name);
-  const int *const end = saved.end;
-  const int *p = saved.begin;
-  const int *q = line.begin;
-  while (p != end)
-    if (*p != *q)
-      goto SAVED_LINE_DOES_NOT_MATCH;
-    else
-      p++, q++;
   debug ("saved line matched");
 }
 
@@ -1621,14 +1647,12 @@ static void conclude_satisfiable_query_with_model (int type) {
 }
 
 static void check_core_subset_of_query (int type) {
-  for (all_elements (int, lit, query))
-    marks[lit] = true;
+  mark_query ();
   for (all_elements (int, lit, line))
     if (!marks[lit])
       check_error ("core literal %d not in query at line %zu in '%s'", lit,
                    start_of_query, interactions->name);
-  for (all_elements (int, lit, query))
-    marks[lit] = false;
+  unmark_query ();
 }
 
 static void conclude_unsatisfiable_query_with_core (int type) {
@@ -1636,7 +1660,7 @@ static void conclude_unsatisfiable_query_with_core (int type) {
   check_line_propagation_yields_conflict (type);
   assert (saved_type == 'u'); // TODO what about 'f'?
   check_core_subset_of_query (type);
-  match_saved (type, "query");
+  match_saved (type, "unsatisfiable core");
   statistics.conclusions++;
   statistics.cores++;
   assert (!level || inconsistent);

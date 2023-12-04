@@ -12,18 +12,22 @@ static const char * idrup_check_usage =
 "  -l | --logging  enable very verbose logging\n"
 #endif
 "\n"
+
 "Exactly two files are read. The first '<icnf>' is an incremental CNF file\n"
 "augmented with all interactions between the user and the SAT solver.\n"
 "Thus the letter 'i' is overloaded and means both 'incremental' and\n"
 "'interactions'. The second '<idrup>' file is meant to be a super-set of\n"
 "the interactions file but additionally has all the low level proof steps.\n"
+
 "\n"
+
 "The checker makes sure the interactions match the proof and all proof\n"
 "steps are justified. This is only the case though for the default\n"
 "'pedantic' and the 'strict' mode.  Checking is less strict in 'relaxed'\n"
 "mode where conclusion missing in the proof will be skipped.  Still the\n"
 "exit code will only be zero if all checks go through and thus the\n"
 "interactions are all checked.\n"
+
 "\n"
 "These modes can can be set explicitly as follows:\n"
 "\n"
@@ -31,10 +35,12 @@ static const char * idrup_check_usage =
 "  --relaxed   relaxed mode (missing 'm' and 'u' proof lines ignored)\n"
 "  --pedantic  pedantic mode (requires conclusion lines in both files\n"
 "\n"
+
 "The default mode is strict checking which still allows headers to be\n"
 "skipped and interaction conclusions ('v' and 'f' lines) to be optional\n"
-"in the interaction file while corresponing proof conclusions ('m' and\n"
+"in the interaction file while corresponding proof conclusions ('m' and\n"
 "'u' lines) being mandatory in the proof file.\n"
+
 ;
 
 // clang-format on
@@ -160,7 +166,7 @@ static size_t allocated; // Allocated variables.
 static bool *imported;         // Variable index imported?
 static unsigned *levels;       // Decision level of assigned variables.
 static struct clauses *matrix; // Mapping literals to watcher stacks.
-static signed char *values;    // Assignment of literal: -1,0,1.
+static signed char *values;    // Assignment of literal: -1, 0, or 1.
 static bool *marks;            // Marks of literals.
 
 // Default preallocated trail.
@@ -1226,15 +1232,19 @@ static void save_query (void) {
 /*------------------------------------------------------------------------*/
 
 // This is the essential checking function which checks that added lemmas
-// are indeed reverse unit propagation (RUP) implied.  It is slightly more
-// complicated as it needs to care about units.
+// are indeed reverse unit propagation (RUP) implied and unsatisfiable cores
+// are indeed unsatisfiable.  The first case requires the literals in the
+// current line to be assumed negatively while the second case requires them
+// to be assigned positively, as determined by the last 'sign' argument.
+// The other arguments are for context sensitive logging and error messages.
 
-static void check_implied (int type, const char * type_str, int sign) {
+static void check_implied (int type, const char *type_str, int sign) {
 
   assert (sign == 1 || sign == -1);
 
   if (inconsistent) {
-    debug ("skipping implication check as formula is inconsistent");
+    debug ("skipping %s implication check as formula already inconsistent",
+           type_str);
     return;
   }
 
@@ -1248,20 +1258,22 @@ static void check_implied (int type, const char * type_str, int sign) {
     return;
   }
 
-  // After all root-level units have been propagated the negation of
-  // all literals in the line as decision and propagate.
+  // After all root-level units have been propagated assume all literals in
+  // the line as decision if 'sign=1' or their negation if 'sign=-1'.
 
   debug ("checking %s line is implied", type_str);
   for (all_elements (int, lit, line)) {
     lit *= sign;
     signed char value = values[lit];
-    if (value < 0)
-      continue;
     if (value > 0) {
-      debug ("literal %s already satisfied", debug_literal (lit));
+      debug ("assumption %s already satisfied", debug_literal (lit));
+      continue;
+    }
+    if (value < 0) {
+      debug ("assumption %s already falsified", debug_literal (lit));
       goto IMPLICATION_CHECK_SUCCEEDED;
     }
-    assign_decision (-lit);
+    assign_decision (lit);
   }
 
   if (propagate ())
@@ -1280,7 +1292,8 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 // Clauses are found by marking the literals in the line and then traversing
 // the watches of them to find all clause of the same size with all literals
-// marked and active (not weakened).  This could be sped
+// marked and active (not weakened).  It might be possible to speed up this
+// part with hash table, which on the other hand would require more space.
 
 static void mark_literal (int lit) {
   // debug ("marking %s", debug_literal (lit));
@@ -1465,7 +1478,7 @@ static void check_model (int type) {
 
 static void justify_unsatisfiable_core () {
   debug ("justifying unsatisfiable core");
-  check_implied ('u', "unsatisfiable core", -1);
+  check_implied ('u', "unsatisfiable core", 1);
   statistics.conclusions++;
   statistics.justifications++;
   reset_checker ();
@@ -1496,7 +1509,7 @@ static void import_add_input (void) {
 
 static void import_check_then_add_lemma () {
   import_literals ();
-  check_implied ('l', "lemma", 1);
+  check_implied ('l', "lemma", -1);
   add_clause (false);
   statistics.lemmas++;
 }

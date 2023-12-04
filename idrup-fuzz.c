@@ -264,7 +264,7 @@ static void fuzz (uint64_t seed) {
       if (!quiet)
 	fputc ('s', stdout), fflush (stdout);
       fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
-      fputc ('c', icnf);
+      fputc ('m', icnf);
       unsigned values = pick (&rng, 0, vars);
       for (unsigned i = 0; i != values; i++) {
         int lit = pick (&rng, 1, vars);

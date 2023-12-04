@@ -1,6 +1,9 @@
 TODO
 ----
 
+- tautological clauses
+- check query (in both conclusions)
+- m,u,f lines
 - complete justification checker (check for superset)
 - produce occasionally empty clauses in fuzzer
 - interleave fuzzing with simplification occasionally

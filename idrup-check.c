@@ -27,13 +27,14 @@ static const char * idrup_check_usage =
 "\n"
 "These modes can can be set explicitly as follows:\n"
 "\n"
-"  --strict    strict mode (requires 'v' and 'j' lines in proof only)\n"
-"  --relaxed   relaxed mode (missing 'v' and 'j' proof lines ignored)\n"
-"  --pedantic  pedantic mode (requires 'v' and 'j' in both files\n"
+"  --strict    strict mode (requires 'm' and 'u' proof lines only)\n"
+"  --relaxed   relaxed mode (missing 'm' and 'u' proof lines ignored)\n"
+"  --pedantic  pedantic mode (requires conclusion lines in both files\n"
 "\n"
 "The default mode is strict checking which still allows headers to be\n"
-"skipped and conclusions ('v' and 'j' lines) to be optional in the\n"
-"interaction file while still being mandatory in the proof file.\n"
+"skipped and interaction conclusions ('v' and 'f' lines) to be optional\n"
+"in the interaction file while corresponing proof conclusions ('m' and\n"
+"'u' lines) being mandatory in the proof file.\n"
 ;
 
 // clang-format on
@@ -131,10 +132,10 @@ static struct ints line;  // Current line of integers parsed.
 static struct ints saved; // Saved line for checking.
 static struct ints query; // Saved query for checking.
 
-// When saving a line the start of the line is saved too.
+// When saving a line the type and start of the line is saved too.
 
 static size_t start_of_saved;
-;
+static int saved_type;
 
 // Constant strings parsed in 'p' and 's' lines.
 
@@ -1250,7 +1251,7 @@ static void check_implied (int type, const char * type_str, int sign) {
   // After all root-level units have been propagated the negation of
   // all literals in the line as decision and propagate.
 
-  debug ("checking lemma line is implied");
+  debug ("checking %s line is implied", type_str);
   for (all_elements (int, lit, line)) {
     lit *= sign;
     signed char value = values[lit];
@@ -1271,7 +1272,8 @@ IMPLICATION_CHECK_SUCCEEDED:
   if (level)
     backtrack (0);
 
-  debug ("implication check succeeded");
+  debug ("%s implication check succeeded", type_str);
+  (void) type_str;
 }
 
 /*------------------------------------------------------------------------*/
@@ -1402,7 +1404,7 @@ static void restore_clause (struct clause *c) {
 
 // Check that there are no clashing literals (both positive and negative
 // occurrence of a variable) in the current line.  This is a mandatory check
-// for conclusions, i.e., for both 'v' models and 'j' core lines.
+// for conclusions, i.e., for both 'm' models and 'u' core lines.
 
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
@@ -1463,7 +1465,7 @@ static void check_model (int type) {
 
 static void justify_unsatisfiable_core () {
   debug ("justifying unsatisfiable core");
-  check_implied ('u', "unsatisfiable core", 1); // TODO should become '-1'.
+  check_implied ('u', "unsatisfiable core", -1);
   statistics.conclusions++;
   statistics.justifications++;
   reset_checker ();
@@ -1559,10 +1561,11 @@ static void match_saved (const char *type_str) {
   debug ("saved line matched");
 }
 
-static void save_line (void) {
-  debug ("saving line");
+static void save_line (int type) {
+  debug ("saving '%c' line", type);
   COPY (int, saved, line);
   start_of_saved = file->start_of_line;
+  saved_type = type;
 }
 
 static bool match_header (const char *expected) {
@@ -1615,7 +1618,7 @@ static int parse_and_check (void) {
   // checker can not guarantee the input clauses to be satisfied at this
   // point.
 
-  // For missing 'j' justification lines the checker might end up in
+  // For missing 'u' justification lines the checker might end up in
   // a similar situation (in case the user claims a justification core
   // which is not implied by unit propagation).  In these cases the
   // program continues without error but simply exit with exit code '2' to
@@ -1659,11 +1662,11 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line ('i');
     if (type == 'i') {
-      save_line ();
+      save_line (type);
       import_add_input ();
       goto PROOF_INPUT;
     } else if (type == 'q') {
-      save_line ();
+      save_line (type);
       goto PROOF_QUERY;
     } else if (type == 0)
       goto END_OF_CHECKING;
@@ -1771,26 +1774,26 @@ static int parse_and_check (void) {
     STATE (INTERACTION_SATISFIED);
     set_file (interactions);
     int type = next_line (0);
-    if (type == 'v') {
+    if (type == 'v' || type == 'm') {
       check_line_consistency (type);
-      save_line ();
-      goto PROOF_VALUES;
+      save_line (type);
+      goto PROOF_MODEL;
     } else {
-      unexpected_line (type, "'v'");
+      unexpected_line (type, "'v' or 'm'");
       goto UNREACHABLE;
     }
   }
   {
-    STATE (PROOF_VALUES);
+    STATE (PROOF_MODEL);
     set_file (proof);
     int type = next_line (0);
-    if (type == 'v') {
+    if (type == 'm') {
       check_line_consistency (type);
       check_line_consistent_with_saved (type);
       check_model (type);
       goto INTERACTION_INPUT;
     } else {
-      unexpected_line (type, "'v'");
+      unexpected_line (type, "'m'");
       goto UNREACHABLE;
     }
   }
@@ -1798,25 +1801,28 @@ static int parse_and_check (void) {
     STATE (INTERACTION_UNSATISFIED);
     set_file (interactions);
     int type = next_line (0);
-    if (type == 'j') {
+    if (type == 'f') {
+      save_line (type);
+      goto PROOF_CORE;
+    } else if (type == 'u') {
       check_line_consistency (type);
-      save_line ();
-      goto PROOF_JUSTIFY;
+      save_line (type);
+      goto PROOF_CORE;
     } else {
-      unexpected_line (type, "'j'");
+      unexpected_line (type, "'f' | 'u'");
       goto UNREACHABLE;
     }
   }
   {
-    STATE (PROOF_JUSTIFY);
+    STATE (PROOF_CORE);
     set_file (proof);
     int type = next_line (0);
-    if (type == 'j') {
+    if (type == 'u') {
       check_line_consistency (type);
       justify_unsatisfiable_core (type);
       goto INTERACTION_INPUT;
     } else {
-      unexpected_line (type, "'j'");
+      unexpected_line (type, "'u'");
       goto UNREACHABLE;
     }
   }

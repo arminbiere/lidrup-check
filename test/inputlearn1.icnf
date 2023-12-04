@@ -4,4 +4,4 @@ i -1 2 0
 i -2 3 0
 q -3 0
 s UNSATISFIABLE
-j 3 0
+u -3 0

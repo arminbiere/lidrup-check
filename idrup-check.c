@@ -174,7 +174,6 @@ static struct {
 static struct { int **begin, **end; } control;
 
 static bool inconsistent; // Empty clause derived.
-static bool failed;       // Failed assumption found.
 
 // Need to store empty clauses on a separate stack as they are not watched.
 
@@ -924,17 +923,6 @@ static void assign_decision (int lit) {
   debug ("assign %s as decision", debug_literal (lit));
 }
 
-static void assign_assumption (int lit) {
-  push_control ();
-  push_trail (lit);
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = level;
-  statistics.decisions++;
-  debug ("assign %s as assumption", debug_literal (lit));
-}
-
 /*------------------------------------------------------------------------*/
 
 // Variables are only unassigned during backtracking.
@@ -1219,25 +1207,12 @@ static bool propagate (void) {
 // A new query starts a new context with potentially new assumptions and
 // thus we have to backtrack to the root-level and reset the failed flag.
 
-static void reset_assignment (void) {
+static void reset_checker (void) {
   if (!inconsistent && level) {
     debug ("resetting assignment");
     backtrack (0);
   } else
     debug ("no need to reset assignment");
-}
-
-static void reset_failed (void) {
-  if (!inconsistent && failed) {
-    debug ("resetting failed");
-    failed = false;
-  } else
-    debug ("no need to reset failed");
-}
-
-static void reset_checker (void) {
-  reset_assignment ();
-  reset_failed ();
 }
 
 static void save_query (void) {
@@ -1251,80 +1226,27 @@ static void save_query (void) {
 
 // This is the essential checking function which checks that added lemmas
 // are indeed reverse unit propagation (RUP) implied.  It is slightly more
-// complicated as it needs to care about units and assumptions.
+// complicated as it needs to care about units.
 
-static void check_implied (int type) {
+static void check_lemma_implied () {
 
   if (inconsistent) {
     debug ("skipping implication check as formula is inconsistent");
     return;
   }
 
-  if (type == 'l' && failed) {
-    debug ("skipping implication check as query already failed");
-    return;
-  }
+  assert (!level);
 
   // First propagate all new units on decision level zero.
 
-  if (trail.propagate < trail.units) {
-    assert (!level);
-    if (level)
-      backtrack (0); // TODO unreachable?
-    if (!propagate ()) {
-      message ("root-level unit propagation yields conflict");
-      inconsistent = true;
-      return;
-    }
+  if (trail.propagate < trail.units && !propagate ()) {
+    message ("root-level unit propagation yields conflict");
+    inconsistent = true;
+    return;
   }
 
-  size_t size_query = SIZE (query);
-
-  if (type == 'l') {
-
-    // Then care about assumptions.
-
-#ifndef NDEBUG
-    assert (level <= size_query);
-    for (size_t i = 0; i != level; i++) {
-      int assumption = query.begin[i];
-      assert (values[assumption] > 0);
-    }
-#endif
-    assert (!failed);
-    while (level < size_query) {
-      int assumption = query.begin[level];
-      signed char value = values[assumption];
-      if (value < 0) {
-        debug ("assumption %s falsified", debug_literal (assumption));
-        failed = true;
-        goto IMPLICATION_CHECK_SUCCEEDED;
-      } else if (value > 0) {
-        debug ("assumption %s already satisfied",
-               debug_literal (assumption));
-        push_control ();
-        debug ("faking decision");
-      } else {
-        assert (!value);
-        assign_assumption (assumption);
-        if (!propagate ()) {
-          failed = true;
-          goto IMPLICATION_CHECK_SUCCEEDED;
-        }
-      }
-    }
-
-  } else if (level) {
-    debug ("forcing backtracking due to core checking");
-    backtrack (0);
-    assert (trail.propagate == trail.end);
-  }
-
-  debug ("checking consistency of assumptions");
-
-  // Finally after all root-level units have been propagated and all
-  // assumptions are assigned, assume the negation of all literals in the
-  // line as decision.
+  // After all root-level units have been propagated the negation of
+  // all literals in the line as decision and propagate.
 
   debug ("checking line is implied");
   for (all_elements (int, lit, line)) {
@@ -1336,25 +1258,16 @@ static void check_implied (int type) {
       goto IMPLICATION_CHECK_SUCCEEDED;
     }
     assign_decision (-lit);
-    if (!propagate ()) {
-      goto IMPLICATION_CHECK_SUCCEEDED;
-    }
   }
 
-  // Finally propagate all the assumptions and decisions and if this
-  // propagation does not give a conflict produce an error message.
-
-  line_error (type, "implication check failed:");
+  if (propagate ())
+    line_error ('l', "implication check failed:");
 
 IMPLICATION_CHECK_SUCCEEDED:
 
-  if (type == 'l') {
-    if (level > size_query) // TODO what about more ILB?
-      backtrack (size_query);
-  } else if (level)
+  if (level)
     backtrack (0);
 
-  assert (level <= size_query);
   debug ("implication check succeeded");
 }
 
@@ -1545,12 +1458,16 @@ static void check_model (int type) {
   debug ("model checked");
 }
 
-static void justify_core (int type) {
-  debug ("justifying core");
-  check_implied (type);
+static void check_unsatisfiable_core_implied () {
+  // TODO
+}
+
+static void justify_unsatisfiable_core () {
+  debug ("justifying unsatisfiable core");
+  check_unsatisfiable_core_implied ();
   statistics.conclusions++;
   statistics.justifications++;
-  reset_checker (); // TODO needed?
+  reset_checker ();
   debug ("core justified");
 }
 
@@ -1576,9 +1493,9 @@ static void import_add_input (void) {
   statistics.inputs++;
 }
 
-static void import_check_then_add_lemma (int type) {
+static void import_check_then_add_lemma () {
   import_literals ();
-  check_implied (type);
+  check_lemma_implied ();
   add_clause (false);
   statistics.lemmas++;
 }
@@ -1897,7 +1814,7 @@ static int parse_and_check (void) {
     int type = next_line (0);
     if (type == 'j') {
       check_line_consistency (type);
-      justify_core (type);
+      justify_unsatisfiable_core (type);
       goto INTERACTION_INPUT;
     } else {
       unexpected_line (type, "'j'");
@@ -1929,7 +1846,7 @@ static void release_watches (void) {
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->input)
-	continue;		// Released separately.
+        continue; // Released separately.
       if (c->size < 2)
         free_clause (c);
       else {

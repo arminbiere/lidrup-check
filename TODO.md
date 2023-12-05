@@ -2,8 +2,7 @@ TODO
 ----
 
 - tautological clauses
-- check failed lines
-- distinguish values and model lines correctly
+- check failed assumptions 'f' lines
 - produce occasionally empty clauses in fuzzer
 - interleave fuzzing with simplification occasionally
 - add tests for full coverage of error messages

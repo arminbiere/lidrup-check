@@ -75,7 +75,7 @@ static bool limited = false;          // If repetitions limits this is set.
 
 /*------------------------------------------------------------------------*/
 
-static volatile bool completed; // Line completed.
+static volatile bool completed;  // Line completed.
 static volatile uint64_t fuzzed; // Number of fuzzed tests.
 
 /*------------------------------------------------------------------------*/
@@ -193,9 +193,9 @@ static void statistics () {
 
 // Signal handling (we only catch interrupts, i.e., '<control-c>').
 
-static volatile bool caught;    // Signal handled.
+static volatile bool caught; // Signal handled.
 
-static void (*saved) (int);     // Saved signal handler.
+static void (*saved) (int); // Saved signal handler.
 
 static void catch (int sig) {
   if (caught)
@@ -271,6 +271,7 @@ static void fuzz (uint64_t seed) {
     unsigned part = pick (&rng, (subset + 1) / 2, (3 * subset + 1) / 2);
     if (!quiet)
       printf (" %u", part), fflush (stdout);
+    unsigned p = pick (&rng, 0, 4 * part);
     for (unsigned i = 0; i != part; i++) {
       unsigned k;
       if (!pick (&rng, 0, clauses / 2))
@@ -296,51 +297,70 @@ static void fuzz (uint64_t seed) {
       }
       ccadical_add (solver, 0);
       fputs (" 0\n", icnf);
-    }
-    unsigned k = pick (&rng, 0, min (10, vars));
-    if (!quiet)
-      printf ("/%u", k), fflush (stdout);
-    int query[k];
-    fputc ('q', icnf);
-    pick_literals (&rng, query, k);
-    for (unsigned j = 0; j != k; j++) {
-      int lit = query[j];
-      ccadical_assume (solver, lit);
-      fprintf (icnf, " %d", lit);
-    }
-    fputs (" 0\n", icnf), fflush (icnf);
-    int res = ccadical_solve (solver);
-    bool concluded = false;
-    if (res == 10) {
-      if (!quiet)
-        fputc ('s', stdout), fflush (stdout);
-      fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
-      fputc ('v', icnf);
-      unsigned values = pick (&rng, 0, vars);
-      for (unsigned i = 0; i != values; i++) {
-        int lit = pick (&rng, 1, vars);
-        int val = ccadical_val (solver, lit);
-        fprintf (icnf, " %d", val == lit ? lit : -lit);
-        concluded = true;
+      if (i == p) {
+        if (!quiet)
+          fputc ('p', stdout), fflush (stdout);
+        fputs ("q 0\n", icnf), fflush (icnf);
+        int res = ccadical_simplify (solver);
+        if (res) {
+	  fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
+          assert (res == 20);
+          if (!quiet)
+            fputs ("*u", stdout), fflush (stdout);
+          fputs ("u 0\n", icnf), fflush (icnf);
+          goto CONTINUE_WITH_OUTER_LOOP;
+        }
+	else
+	  fputs ("s UNKNOWN\n", icnf), fflush (icnf);
       }
-    } else {
+    }
+    {
+      unsigned k = pick (&rng, 0, min (10, vars));
       if (!quiet)
-        fputc ('u', stdout), fflush (stdout);
-      assert (res == 20);
-      fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
-      fputc ('u', icnf); // TODO what about 'f'?
+        printf ("/%u", k), fflush (stdout);
+      int query[k];
+      fputc ('q', icnf);
+      pick_literals (&rng, query, k);
       for (unsigned j = 0; j != k; j++) {
         int lit = query[j];
-        if (ccadical_failed (solver, lit))
-          fprintf (icnf, " %d", lit);
-        concluded = true;
+        ccadical_assume (solver, lit);
+        fprintf (icnf, " %d", lit);
       }
+      fputs (" 0\n", icnf), fflush (icnf);
+      int res = ccadical_solve (solver);
+      bool concluded = false;
+      if (res == 10) {
+        if (!quiet)
+          fputc ('s', stdout), fflush (stdout);
+        fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
+        fputc ('v', icnf);
+        unsigned values = pick (&rng, 0, vars);
+        for (unsigned i = 0; i != values; i++) {
+          int lit = pick (&rng, 1, vars);
+          int val = ccadical_val (solver, lit);
+          fprintf (icnf, " %d", val == lit ? lit : -lit);
+          concluded = true;
+        }
+      } else {
+        if (!quiet)
+          fputc ('u', stdout), fflush (stdout);
+        assert (res == 20);
+        fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
+        fputc ('u', icnf); // TODO what about 'f'?
+        for (unsigned j = 0; j != k; j++) {
+          int lit = query[j];
+          if (ccadical_failed (solver, lit))
+            fprintf (icnf, " %d", lit);
+          concluded = true;
+        }
+      }
+      fputs (" 0\n", icnf);
+      fflush (icnf);
+      (void) concluded;
+      // if (!concluded) // TODO could make this optional.
+      ccadical_conclude (solver);
     }
-    fputs (" 0\n", icnf);
-    fflush (icnf);
-    (void) concluded;
-    // if (!concluded) // TODO could make this optional.
-    ccadical_conclude (solver);
+  CONTINUE_WITH_OUTER_LOOP:;
   }
   ccadical_release (solver);
   fclose (icnf);

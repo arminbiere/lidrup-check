@@ -149,8 +149,9 @@ static int saved_type;
 
 static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
-static const char *const ICNF = "icnf";
+static const char *const UNKNOWN = "UNKNOWN";
 static const char *const IDRUP = "idrup";
+static const char *const ICNF = "icnf";
 
 // The parser saves such strings here.
 
@@ -662,12 +663,25 @@ static int next_line_without_printing (char default_type) {
         parse_error ("expected new-line after status");
       string = SATISFIABLE;
     } else if (ch == 'U') {
-      for (const char *p = "NSATISFIABLE"; *p; p++)
-        if (*p != next_char ())
-          goto INVALID_STATUS_LINE;
-      if (next_char () != '\n')
-        goto EXPECTED_NEW_LINE_AFTER_STATUS;
-      string = UNSATISFIABLE;
+      if (next_char () != 'N')
+        goto INVALID_STATUS_LINE;
+      ch = next_char ();
+      if (ch == 'S') {
+        for (const char *p = "ATISFIABLE"; *p; p++)
+          if (*p != next_char ())
+            goto INVALID_STATUS_LINE;
+        if (next_char () != '\n')
+          goto EXPECTED_NEW_LINE_AFTER_STATUS;
+        string = UNSATISFIABLE;
+      } else if (ch == 'K') {
+        for (const char *p = "NOWN"; *p; p++)
+          if (*p != next_char ())
+            goto INVALID_STATUS_LINE;
+        if (next_char () != '\n')
+          goto EXPECTED_NEW_LINE_AFTER_STATUS;
+        string = UNKNOWN;
+      } else
+        goto INVALID_STATUS_LINE;
     } else
       goto INVALID_STATUS_LINE;
     return 's';
@@ -1833,8 +1847,12 @@ static int parse_and_check (void) {
       goto UNREACHABLE;
     } else if (string == SATISFIABLE)
       goto INTERACTION_SATISFIABLE;
-    else
+    else if (string == UNSATISFIABLE)
       goto INTERACTION_UNSATISFIABLE;
+    else { 
+      assert (string == UNKNOWN);
+      goto INTERACTION_UNKNOWN;
+    }
   }
   {
     STATE (INTERACTION_SATISFIABLE);
@@ -1863,6 +1881,21 @@ static int parse_and_check (void) {
       goto UNREACHABLE;
     } else {
       unexpected_line (type, "'s UNSATISFIABLE'");
+      goto UNREACHABLE;
+    }
+  }
+  {
+    STATE (INTERACTION_UNKNOWN);
+    set_file (interactions);
+    int type = next_line (0);
+    if (type == 's' && string == UNKNOWN)
+      goto INTERACTION_INPUT;
+    else if (type == 's') {
+      parse_error ("unexpected 's %s' line (expected 's UNKNOWN')",
+                   string);
+      goto UNREACHABLE;
+    } else {
+      unexpected_line (type, "'s UNKNOWN'");
       goto UNREACHABLE;
     }
   }

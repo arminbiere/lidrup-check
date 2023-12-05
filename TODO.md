@@ -1,10 +1,8 @@
 TODO
 ----
 
-- mark based matching
 - tautological clauses
-- check query (in both conclusions)
-- complete justification checker (check for superset)
+- check failed assumptions 'f' lines
 - produce occasionally empty clauses in fuzzer
 - interleave fuzzing with simplification occasionally
 - add tests for full coverage of error messages

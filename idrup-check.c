@@ -37,9 +37,9 @@ static const char * idrup_check_usage =
 "\n"
 
 "The default mode is strict checking which still allows headers to be\n"
-"skipped and interaction conclusions ('v' and 'f' lines) to be optional\n"
-"in the interaction file while corresponding proof conclusions ('m' and\n"
-"'u' lines) being mandatory in the proof file.\n"
+"skipped and interaction conclusions ('v', 'm', 'f' and 'u' lines) to be\n"
+"optional in the interaction file while corresponding proof conclusions\n"
+"('m' and 'u' lines) being mandatory in the proof file.\n"
 
 ;
 
@@ -1441,15 +1441,14 @@ static void restore_clause (struct clause *c) {
   debug_clause (c, "restoring");
   c->weakened = false;
 
-  // TODO This could be optimized (only backtrack as much as necessary).
+  assert (!level);
 
-  if (level) {
-    debug ("forcing backtracking after restoring clause");
-    backtrack (0);
-  }
+  // TODO add an internal checker that watches are good or unwatch
+  // weakened clauses during weakening and rewatch them here.  For the later
+  // alternative remove the checks on ignoring forced assignments and
+  // conflicts by weakened clauses and replace it by an assertion instead.
 
-  // TODO This could be optimized too (only necessary literals
-  // repropagated).
+  // TODO only trigger if repropagation is necessary.
 
   if (trail.begin < trail.propagate) {
     assert (!level);
@@ -1710,7 +1709,7 @@ static int parse_and_check (void) {
 
   // By default any parse error or failed check will abort the program
   // with exit code '1' except in 'relaxed' parsing mode where parsing and
-  // checking continues if in the proof a model 'v' line is missing after
+  // checking continues if in the proof a model 'm' line is missing after
   // a 's SATISFIABLE' status line. Without having such a model the
   // checker can not guarantee the input clauses to be satisfied at this
   // point.

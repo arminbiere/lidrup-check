@@ -95,8 +95,9 @@ struct clause {
   size_t lineno;
 #endif
   unsigned size;
-  bool weakened;
   bool input;
+  bool weakened;
+  bool tautological;
   int lits[];
 };
 
@@ -506,6 +507,8 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   va_start (ap, fmt);
   vprintf (fmt, ap);
   va_end (ap);
+  if (c->tautological)
+    fputs (" tautological", stdout);
   if (c->weakened)
     fputs (" weakened", stdout);
   if (c->input)
@@ -962,7 +965,65 @@ static void backtrack (unsigned new_level) {
 
 /*------------------------------------------------------------------------*/
 
+// We use a literal map which maps literals to true to mark literals in
+// 'line', 'saved' and 'query' which allows us to check set equivalence
+// ('match_literals') or subset properties ('subset_literals').
+
+static void mark_literal (int lit) {
+  // debug ("marking %s", debug_literal (lit));
+  marks[lit] = true;
+}
+
+static void unmark_literal (int lit) {
+  // debug ("unmarking %s", debug_literal (lit));
+  marks[lit] = false;
+}
+
+static void mark_literals (struct ints *lits) {
+  for (all_elements (int, lit, *lits))
+    mark_literal (lit);
+}
+
+static void unmark_literals (struct ints *lits) {
+  for (all_elements (int, lit, *lits))
+    unmark_literal (lit);
+}
+
+static void mark_line (void) { mark_literals (&line); }
+static void unmark_line (void) { unmark_literals (&line); }
+
+static void mark_query (void) { mark_literals (&query); }
+static void unmark_query (void) { unmark_literals (&query); }
+
+static bool subset_literals (struct ints *a, struct ints *b) {
+  mark_literals (b);
+  bool res = true;
+  for (all_elements (int, lit, *a))
+    if (!marks[lit]) {
+      res = false;
+      break;
+    }
+  unmark_literals (b);
+  return res;
+}
+
+static bool match_literals (struct ints *a, struct ints *b) {
+  return subset_literals (a, b) && subset_literals (b, a);
+}
+
+/*------------------------------------------------------------------------*/
+
 // Clause allocation and deallocation.
+
+static bool line_is_tautological () {
+  bool res = true;
+  for (all_elements (int, lit, line)) {
+    res |= marks[-lit];
+    marks[lit] = true;
+  }
+  unmark_line ();
+  return res;
+}
 
 static struct clause *allocate_clause (bool input) {
   size_t size = SIZE (line);
@@ -982,6 +1043,7 @@ static struct clause *allocate_clause (bool input) {
   c->size = size;
   c->weakened = false;
   c->input = input;
+  c->tautological = line_is_tautological ();
   memcpy (c->lits, line.begin, lits_bytes);
   debug_clause (c, "allocate");
   if (input)
@@ -1293,61 +1355,6 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 /*------------------------------------------------------------------------*/
 
-// We use a literal map which maps literals to true to mark literals in
-// 'line', 'saved' and 'query' which allows us to check set equivalence
-// ('match_literals') or subset properties ('subset_literals').
-
-static void mark_literal (int lit) {
-  // debug ("marking %s", debug_literal (lit));
-  marks[lit] = true;
-}
-
-static void unmark_literal (int lit) {
-  // debug ("unmarking %s", debug_literal (lit));
-  marks[lit] = false;
-}
-
-static void mark_literals (struct ints *lits) {
-  for (all_elements (int, lit, *lits))
-    mark_literal (lit);
-}
-
-static void unmark_literals (struct ints *lits) {
-  for (all_elements (int, lit, *lits))
-    unmark_literal (lit);
-}
-
-static void mark_line (void) { mark_literals (&line); }
-static void unmark_line (void) { unmark_literals (&line); }
-
-#if 0
-
-static void mark_saved (void) { mark_literals (&saved); }
-static void unmark_saved (void) { unmark_literals (&saved); }
-
-#endif
-
-static void mark_query (void) { mark_literals (&query); }
-static void unmark_query (void) { unmark_literals (&query); }
-
-static bool subset_literals (struct ints *a, struct ints *b) {
-  mark_literals (b);
-  bool res = true;
-  for (all_elements (int, lit, *a))
-    if (!marks[lit]) {
-      res = false;
-      break;
-    }
-  unmark_literals (b);
-  return res;
-}
-
-static bool match_literals (struct ints *a, struct ints *b) {
-  return subset_literals (a, b) && subset_literals (b, a);
-}
-
-/*------------------------------------------------------------------------*/
-
 // Clauses are found by marking the literals in the line and then traversing
 // the watches of them to find all clause of the same size with all literals
 // marked and active (not weakened).  It might be possible to speed up this
@@ -1484,6 +1491,8 @@ static void check_line_consistent_with_saved (int type) {
 }
 
 static void check_satisfied_clause (int type, struct clause *c) {
+  if (c->tautological)
+    return;
   for (all_literals (lit, c))
     if (marks[lit])
       return;

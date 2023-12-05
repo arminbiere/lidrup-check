@@ -1434,15 +1434,14 @@ static void restore_clause (struct clause *c) {
   debug_clause (c, "restoring");
   c->weakened = false;
 
-  // TODO This could be optimized (only backtrack as much as necessary).
+  assert (!level);
 
-  if (level) {
-    debug ("forcing backtracking after restoring clause");
-    backtrack (0);
-  }
+  // TODO add an internal checker that watches are good or unwatch
+  // weakened clauses during weakening and rewatch them here.  For the later
+  // alternative remove the checks on ignoring forced assignments and
+  // conflicts by weakened clauses and replace it by an assertion instead.
 
-  // TODO This could be optimized too (only necessary literals
-  // repropagated).
+  // TODO only trigger if repropagation is necessary.
 
   if (trail.begin < trail.propagate) {
     assert (!level);

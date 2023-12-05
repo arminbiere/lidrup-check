@@ -2,7 +2,8 @@ TODO
 ----
 
 - tautological clauses
-- complete justification checker (check for superset)
+- check failed lines
+- distinguish values and model lines correctly
 - produce occasionally empty clauses in fuzzer
 - interleave fuzzing with simplification occasionally
 - add tests for full coverage of error messages

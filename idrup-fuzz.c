@@ -28,10 +28,10 @@ static const char * usage =
 "\n"
 
 "All numbers are assumed to be decimally encoded and parsed as 64-bit\n"
-"number in the range 0 to 2^64-1 (18446744073709551615).  If the number of\n"
-"repetitions is unspecified fuzzing runs without limit.  Without a seed\n"
-"specified a random seed is generated based on the process identifier\n"
-"and the processor clock cycles.  If a seed is specified but no repition\n"
+"number in the range 0 to 2^64-1 (18446744073709551615).  If the number\n"
+"of repetitions is unspecified fuzzing runs without limit.  Without a seed\n"
+"specified a random seed is generated based on the process identifier and\n"
+"the processor clock cycles.  If a seed is specified but no repetition\n"
 "then only a single fuzzing test with this seed is run.  This is useful\n"
 "to rerun and debug a failing fuzzing run.\n"
 

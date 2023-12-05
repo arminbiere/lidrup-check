@@ -1,7 +1,6 @@
 TODO
 ----
 
-- mark based matching
 - tautological clauses
 - check query (in both conclusions)
 - complete justification checker (check for superset)

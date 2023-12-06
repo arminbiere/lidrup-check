@@ -1694,7 +1694,7 @@ static void check_line_variables_subset_of_query (int type) {
 
 static void check_saved_failed_literals_match_core (int type) {
   for (all_elements (int, lit, line))
-    marks[lit] = marks[-lit] = true;
+    marks[lit] = true;
   for (all_elements (int, lit, saved))
     if (marks[-lit])
       check_error (
@@ -1704,7 +1704,7 @@ static void check_saved_failed_literals_match_core (int type) {
           -lit, lit, start_of_saved, interactions->name);
   unmark_line ();
   for (all_elements (int, lit, line))
-    marks[lit] = marks[-lit] = false;
+    marks[lit] = false;
   (void) type;
 }
 

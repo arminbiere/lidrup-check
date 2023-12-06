@@ -1654,6 +1654,7 @@ static void check_line_satisfies_query (int type) {
                    lit, start_of_query, interactions->name);
   unmark_line ();
   (void) type;
+  debug ("line literals satisfy query");
 }
 
 static void conclude_satisfiable_query_with_model (int type) {
@@ -1676,18 +1677,49 @@ static void check_core_subset_of_query (int type) {
       check_error ("core literal %d not in query at line %zu in '%s'", lit,
                    start_of_query, interactions->name);
   unmark_query ();
+  debug ("core subset of query");
+  (void) type;
+}
+
+static void check_line_variables_subset_of_query (int type) {
+  mark_query ();
+  for (all_elements (int, lit, line))
+    if (!marks[lit] && !marks[-lit])
+      check_error ("literal %d nor %d in query at line %zu in '%s'", lit,
+                   -lit, start_of_query, interactions->name);
+  unmark_query ();
+  debug ("line variables subset of query");
+  (void) type;
+}
+
+static void check_saved_failed_literals_match_core (int type) {
+  mark_line ();
+  for (all_elements (int, lit, saved))
+    if (marks[-lit])
+      check_error (
+          "literal %d claimed not to be a failed literal "
+          "(as it occurs negatively as %d in the 'f' line %zu in '%s') "
+          "is in this unsatisfiable core 'u' line of the proof",
+          -lit, lit, start_of_saved, interactions->name);
+  unmark_line ();
+  (void) type;
 }
 
 static void conclude_unsatisfiable_query_with_core (int type) {
   debug ("concluding satisfiable query");
   check_line_propagation_yields_conflict (type);
-  assert (saved_type == 'u'); // TODO what about 'f'?
   check_core_subset_of_query (type);
-  match_saved (type, "unsatisfiable core");
+  if (saved_type == 'u')
+    match_saved (type, "unsatisfiable core");
+  else {
+    assert (saved_type == 'f');
+    check_saved_failed_literals_match_core (type);
+  }
   statistics.conclusions++;
   statistics.cores++;
   assert (!level || inconsistent);
   debug ("unsatisfiable query concluded");
+  (void) type;
 }
 
 /*------------------------------------------------------------------------*/
@@ -1849,7 +1881,7 @@ static int parse_and_check (void) {
       goto INTERACTION_SATISFIABLE;
     else if (string == UNSATISFIABLE)
       goto INTERACTION_UNSATISFIABLE;
-    else { 
+    else {
       assert (string == UNKNOWN);
       goto INTERACTION_UNKNOWN;
     }
@@ -1891,8 +1923,7 @@ static int parse_and_check (void) {
     if (type == 's' && string == UNKNOWN)
       goto INTERACTION_INPUT;
     else if (type == 's') {
-      parse_error ("unexpected 's %s' line (expected 's UNKNOWN')",
-                   string);
+      parse_error ("unexpected 's %s' line (expected 's UNKNOWN')", string);
       goto UNREACHABLE;
     } else {
       unexpected_line (type, "'s UNKNOWN'");
@@ -1935,7 +1966,8 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'f') {
-      check_error ("'f' lines not support in interaction file yet");
+      check_line_consistency (type);
+      check_line_variables_subset_of_query (type);
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {

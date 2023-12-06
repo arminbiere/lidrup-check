@@ -1693,7 +1693,8 @@ static void check_line_variables_subset_of_query (int type) {
 }
 
 static void check_saved_failed_literals_match_core (int type) {
-  mark_line ();
+  for (all_elements (int, lit, line))
+    marks[lit] = marks[-lit] = true;
   for (all_elements (int, lit, saved))
     if (marks[-lit])
       check_error (
@@ -1702,6 +1703,8 @@ static void check_saved_failed_literals_match_core (int type) {
           "is in this unsatisfiable core 'u' line of the proof",
           -lit, lit, start_of_saved, interactions->name);
   unmark_line ();
+  for (all_elements (int, lit, line))
+    marks[lit] = marks[-lit] = false;
   (void) type;
 }
 

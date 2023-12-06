@@ -1,9 +1,8 @@
 TODO
 ----
 
-- check failed assumptions 'f' lines
+- complete failed assumptions 'f' lines check
 - produce occasionally empty clauses in fuzzer
-- interleave fuzzing with simplification occasionally
 - add tests for full coverage of error messages
 - complete strict and relaxed mode in checker
 - add pedantic, strict and relaxed mode to fuzzer

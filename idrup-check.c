@@ -11,6 +11,7 @@ static const char * idrup_check_usage =
 #ifndef NDEBUG
 "  -l | --logging  enable very verbose logging\n"
 #endif
+"  --version       print version and exit\n"
 "\n"
 
 "Exactly two files are read. The first '<icnf>' is an incremental CNF file\n"
@@ -2266,6 +2267,8 @@ int main (int argc, char **argv) {
 #else
       die ("invalid line option '%s' (compiled without debugging)", arg);
 #endif
+    else if (!strcmp (arg, "--version"))
+      printf ("%s\n", idrup_version), exit (0);
     else if (!strcmp (arg, "--strict"))
       mode = strict;
     else if (!strcmp (arg, "--relaxed"))

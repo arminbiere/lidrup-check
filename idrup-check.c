@@ -135,6 +135,13 @@ static struct file *file;
 
 static struct file *other_file;
 
+/*------------------------------------------------------------------------*/
+
+static bool querying;
+static double start_time;
+
+/*------------------------------------------------------------------------*/
+
 static struct ints line;  // Current line of integers parsed.
 static struct ints saved; // Saved line for checking.
 static struct ints query; // Saved query for checking.
@@ -340,6 +347,9 @@ static void out_of_memory (const char *, ...)
 
 static void fatal_error (const char *fmt, ...) {
   fputs ("idrup-check: fatal internal error: ", stderr);
+  if (file)
+    fprintf (stderr, "at line %zu in '%s': ", file->start_of_line,
+             file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -531,6 +541,50 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   do { \
   } while (false)
 #endif
+
+/*------------------------------------------------------------------------*/
+
+// Resource usage code.
+
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+static double process_time (void) {
+  struct rusage u;
+  double res;
+  (void) getrusage (RUSAGE_SELF, &u);
+  res = u.ru_utime.tv_sec + 1e-6 * u.ru_utime.tv_usec;
+  res += u.ru_stime.tv_sec + 1e-6 * u.ru_stime.tv_usec;
+  return res;
+}
+
+static double start_of_wall_clock_time;
+
+static double absolute_wall_clock_time (void) {
+  struct timeval tv;
+  if (gettimeofday (&tv, 0))
+    return 0;
+  return 1e-6 * tv.tv_usec + tv.tv_sec;
+}
+
+static double wall_clock_time () {
+  return absolute_wall_clock_time () - start_of_wall_clock_time;
+}
+
+static size_t maximum_resident_set_size (void) {
+  struct rusage u;
+  (void) getrusage (RUSAGE_SELF, &u);
+  return ((size_t) u.ru_maxrss) << 10;
+}
+
+static double mega_bytes (void) {
+  return maximum_resident_set_size () / (double) (1 << 20);
+}
+
+static double average (double a, double b) { return b ? a / b : 0; }
+
+static double percent (double a, double b) { return average (100 * a, b); }
 
 /*------------------------------------------------------------------------*/
 
@@ -1557,6 +1611,27 @@ static void check_literals_imported (int type) {
 
 /*------------------------------------------------------------------------*/
 
+static void start_query (void) {
+  if (querying)
+    fatal_error ("query already started");
+  if (verbosity > 0)
+    start_time = wall_clock_time ();
+  querying = true;
+}
+
+static void conclude_query (int res) {
+  if (!querying)
+    fatal_error ("query already concluded");
+  if (verbosity > 0) {
+    double delta = wall_clock_time () - start_time;
+    verbose ("concluding query %zu with result %d taking %.2f seconds",
+             statistics.queries, res, delta);
+  }
+  querying = false;
+}
+
+/*------------------------------------------------------------------------*/
+
 // Merged checking options for each line.
 
 static void import_and_add_input_clause (int type) {
@@ -1668,6 +1743,7 @@ static void conclude_satisfiable_query_with_model (int type) {
   statistics.models++;
   assert (!level);
   debug ("satisfiable query concluded");
+  conclude_query (10);
 }
 
 static void check_core_subset_of_query (int type) {
@@ -1723,6 +1799,7 @@ static void conclude_unsatisfiable_query_with_core (int type) {
   assert (!level || inconsistent);
   debug ("unsatisfiable query concluded");
   (void) type;
+  conclude_query (20);
 }
 
 /*------------------------------------------------------------------------*/
@@ -1811,6 +1888,7 @@ static int parse_and_check (void) {
       import_and_add_input_clause (type);
       goto PROOF_INPUT;
     } else if (type == 'q') {
+      start_query ();
       import_literals ();
       save_line (type);
       save_query ();
@@ -1923,9 +2001,10 @@ static int parse_and_check (void) {
     STATE (INTERACTION_UNKNOWN);
     set_file (interactions);
     int type = next_line (0);
-    if (type == 's' && string == UNKNOWN)
+    if (type == 's' && string == UNKNOWN) {
+      conclude_query (0);
       goto INTERACTION_INPUT;
-    else if (type == 's') {
+    } else if (type == 's') {
       parse_error ("unexpected 's %s' line (expected 's UNKNOWN')", string);
       goto UNREACHABLE;
     } else {
@@ -2066,48 +2145,6 @@ static void release (void) {
 }
 
 /*------------------------------------------------------------------------*/
-
-// Resource usage and statistics printing code.
-
-#include <sys/resource.h>
-#include <sys/time.h>
-#include <unistd.h>
-
-static double process_time (void) {
-  struct rusage u;
-  double res;
-  (void) getrusage (RUSAGE_SELF, &u);
-  res = u.ru_utime.tv_sec + 1e-6 * u.ru_utime.tv_usec;
-  res += u.ru_stime.tv_sec + 1e-6 * u.ru_stime.tv_usec;
-  return res;
-}
-
-static double start_of_wall_clock_time;
-
-static double absolute_wall_clock_time (void) {
-  struct timeval tv;
-  if (gettimeofday (&tv, 0))
-    return 0;
-  return 1e-6 * tv.tv_usec + tv.tv_sec;
-}
-
-static double wall_clock_time () {
-  return absolute_wall_clock_time () - start_of_wall_clock_time;
-}
-
-static size_t maximum_resident_set_size (void) {
-  struct rusage u;
-  (void) getrusage (RUSAGE_SELF, &u);
-  return ((size_t) u.ru_maxrss) << 10;
-}
-
-static double mega_bytes (void) {
-  return maximum_resident_set_size () / (double) (1 << 20);
-}
-
-static double average (double a, double b) { return b ? a / b : 0; }
-
-static double percent (double a, double b) { return average (100 * a, b); }
 
 static void print_statistics (void) {
   double p = process_time ();

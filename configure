@@ -41,7 +41,7 @@ do
     -s | --symbols) symbols=yes;;
     -c | --check) check=yes;;
     -p | --pdf*) TARGETS="$TARGETS pdfs";;
-    -a | --asan) CFLAGS="${CFLAGS} -fsanatize=address";;
+    -a | --asan) CFLAGS="${CFLAGS} -fsanitize=address";;
     *) die "invalid option '$1' (try '-h')";;
   esac
   shift

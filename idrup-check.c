@@ -1171,32 +1171,35 @@ static void unwatch_clause (struct clause *c) {
     REMOVE (struct clause *, empty_clauses, c);
 }
 
+static void connect_literal (int lit, struct clause *c) {
+  debug_clause (c, "connecting %d to", lit);
+  PUSH (inactive[lit], c);
+}
+
+static void disconnect_literal (int lit, struct clause *c) {
+  debug_clause (c, "disconnecting %d from", lit);
+  REMOVE (struct clause *, inactive[lit], c);
+}
+
 static int move_best_watch_to_front (int *lits, const int *const end) {
+  assert (!level);
   int watch = *lits;
   signed char watch_value = values[watch];
-  if (watch_value) {
-    unsigned watch_level = levels[abs (watch)];
+  if (watch_value < 0)
     for (int *p = lits + 1; p != end; p++) {
       int lit = *p;
       signed char lit_value = values[lit];
-      int idx = abs (lit);
-      unsigned lit_level = levels[idx];
-      if (!lit_value || watch_level < lit_level ||
-          (watch_level == lit_level && watch_value < lit_value)) {
-        *p = watch;
-        *lits = lit;
-        if (!lit_value)
-          return lit;
-        watch_level = lit_level;
-        watch_value = lit_value;
-        watch = lit;
-      }
+      if (lit_value < 0)
+        continue;
+      *lits = lit;
+      *p = watch;
+      return lit;
     }
-  }
   return watch;
 }
 
 static void watch_clause (struct clause *c) {
+  assert (!level);
   if (!c->size)
     PUSH (empty_clauses, c);
   else if (c->size == 1)
@@ -1208,33 +1211,6 @@ static void watch_clause (struct clause *c) {
     int lit1 = move_best_watch_to_front (lits + 1, end);
     debug ("first watch %s", debug_literal (lit0));
     debug ("second watch %s", debug_literal (lit1));
-    signed char val1 = values[lit1];
-    if (val1 >= 0)
-      debug ("second watch %s not falsified", debug_literal (lit1));
-    else {
-      signed char val0 = values[lit0];
-      int idx0 = abs (lit0);
-      int idx1 = abs (lit1);
-      unsigned level0 = levels[idx0];
-      unsigned level1 = levels[idx1];
-      if (level1 && (val0 <= 0 || level0 > level1)) {
-#ifndef NDEBUG
-        if (val0 <= 0)
-          debug ("second watch %s falsified at decision level %u "
-                 "and first watch %s not satisfied "
-                 "forces backtracking to decision level %u",
-                 debug_literal (lit1), level1, debug_literal (lit0),
-                 level1 - 1);
-        else
-          debug ("second watch %s falsified at decision level %u and "
-                 "first watch %s satisfied at larger decision level %u "
-                 "forces backtracking to decision level %u",
-                 debug_literal (lit1), level1, debug_literal (lit0), level1,
-                 level1 - 1);
-#endif
-        backtrack (level1 - 1);
-      }
-    }
     watch_literal (lit0, c);
     watch_literal (lit1, c);
   }
@@ -1340,18 +1316,13 @@ static bool propagate (void) {
         watch_literal (replacement, c);
         q--;
       } else if (!other_watch_value) {
-        if (c->weakened)
-          debug_clause (c, "ignoring forcing");
-        else
-          assign_forced (other_watch, c);
+        assert (!c->weakened);
+        assign_forced (other_watch, c);
       } else {
         assert (other_watch_value < 0);
-        if (c->weakened)
-          debug_clause (c, "ignoring conflict");
-        else {
-          res = false;
-          debug_clause (c, "conflict");
-        }
+        assert (!c->weakened);
+        debug_clause (c, "conflict");
+        res = false;
       }
     }
     while (p != watches_end)
@@ -1465,7 +1436,7 @@ static struct clause *find_non_empty_clause (bool weakened) {
   assert (size);
   mark_line ();
   for (all_elements (int, lit, line)) {
-    struct clauses *watches = matrix + lit;
+    struct clauses *watches = (weakened ? inactive : matrix) + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size != size)
         continue;
@@ -1502,6 +1473,29 @@ static struct clause *find_weakened_clause (void) {
   return find_clause (true);
 }
 
+static int
+move_least_occurring_inactive_literal_to_front (struct clause *c) {
+  assert (c->size);
+  int *lits = c->lits;
+  int res = lits[0];
+  size_t res_occurrences = SIZE (inactive[res]);
+  const int *const end = lits + c->size;
+  for (int *p = lits + 1; p != end; p++) {
+    int other = *p;
+    size_t other_occurrences = SIZE (inactive[other]);
+    if (other_occurrences >= res_occurrences)
+      continue;
+    *p = res;
+    res = other;
+    res_occurrences = other_occurrences;
+  }
+  lits[0] = res;
+  assert (res);
+  debug ("literal %s occurs only %zu times", debug_literal (res),
+         res_occurrences);
+  return res;
+}
+
 /*------------------------------------------------------------------------*/
 
 // This section has all the low-level checks.
@@ -1520,36 +1514,47 @@ static void delete_clause (struct clause *c) {
 static void weaken_clause (struct clause *c) {
   assert (!c->weakened);
   debug_clause (c, "weakening");
+  unwatch_clause (c);
   c->weakened = true;
+  if (c->size) {
+    int lit = move_least_occurring_inactive_literal_to_front (c);
+    connect_literal (lit, c);
+  }
   statistics.weakened++;
 }
 
 static void restore_clause (struct clause *c) {
+  assert (!level);
   assert (c->weakened);
   debug_clause (c, "restoring");
-  c->weakened = false;
-
-  assert (!level);
-
-  // TODO add an internal checker that watches are good or unwatch
-  // weakened clauses during weakening and rewatch them here.  For the later
-  // alternative remove the checks on ignoring forced assignments and
-  // conflicts by weakened clauses and replace it by an assertion instead.
-
-  // TODO only trigger if repropagation is necessary.
-
-  if (trail.begin < trail.propagate) {
-    assert (!level);
-    debug ("forcing repropagation of all literals after restoring clause");
-    trail.propagate = trail.begin;
+  if (c->size) {
+    int *lits = begin_literals (c);
+    disconnect_literal (*lits, c);
+    watch_clause (c);
+    int lit0 = lits[0];
+    int val0 = values[lit0];
+    if (c->size > 1) {
+      if (val0 <= 0) {
+        int lit1 = lits[1];
+        int val1 = values[lit1];
+        if (val1 < 0 || (!val1 && val0 < 0)) {
+          if (trail.begin < trail.propagate) {
+            assert (!level);
+            debug ("forcing repropagation after restoring clause");
+            trail.propagate = trail.begin;
+          }
+        }
+      }
+    } else
+      assert (val0 > 0);
   }
-
+  c->weakened = false;
   statistics.restored++;
 }
 
 // Check that there are no clashing literals (both positive and negative
-// occurrence of a variable) in the current line.  This is a mandatory check
-// for conclusions, i.e., for both 'm' models and 'u' core lines.
+// occurrence of a variable) in the current line.  This is a mandatory
+// check for conclusions, i.e., for both 'm' models and 'u' core lines.
 
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
@@ -1562,9 +1567,9 @@ static void check_line_consistency (int type) {
   debug ("line consists of consistent literals");
 }
 
-// Check that there are no literals in the current line which clash with one
-// literal in the saved line (a variable is not allowed to occur positively
-// in one and negatively in the other line).
+// Check that there are no literals in the current line which clash with
+// one literal in the saved line (a variable is not allowed to occur
+// positively in one and negatively in the other line).
 
 static void check_line_consistent_with_saved (int type) {
   mark_line ();
@@ -1826,9 +1831,9 @@ static void conclude_unsatisfiable_query_with_core (int type) {
 
 /*------------------------------------------------------------------------*/
 
-// The main parsing and checking routine can be found below.  It is a simple
-// state-machine implemented with GOTO style programming and uses the
-// following function to show state changes during logging.
+// The main parsing and checking routine can be found below.  It is a
+// simple state-machine implemented with GOTO style programming and uses
+// the following function to show state changes during logging.
 
 #ifndef NDEBUG
 
@@ -2112,8 +2117,8 @@ static int parse_and_check (void) {
 // Clean-up functions.
 
 // Without a global list of clauses we traverse watch lists during
-// deallocation of clauses and only deallocate a clauses if we visit it the
-// second time through its larger watch.
+// deallocation of clauses and only deallocate a clauses if we visit it
+// the second time through its larger watch.
 
 static void release_watches (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {

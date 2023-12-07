@@ -5,7 +5,7 @@ all: @TARGETS@
 idrup-check: idrup-check.o idrup-build.o makefile
 	$(COMPILE) -o $@ idrup-check.o idrup-build.o
 idrup-fuzz: idrup-fuzz.o idrup-build.o makefile ../cadical/build/libcadical.a
-	$(COMPILE) -o $@ idrup-check.o idrup-build.o ../cadical/build/libcadical.a -lstdc++ -lm
+	$(COMPILE) -o $@ idrup-fuzz.o idrup-build.o ../cadical/build/libcadical.a -lstdc++ -lm
 idrup-build.o: idrup-build.c idrup-build.h idrup-config.h makefile
 	$(CC) $(CFLAGS) -c $<
 idrup-check.o: idrup-check.c idrup-build.h makefile

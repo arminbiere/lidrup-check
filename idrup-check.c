@@ -47,6 +47,10 @@ static const char * idrup_check_usage =
 
 /*------------------------------------------------------------------------*/
 
+#include "idrup-build.h"
+
+/*------------------------------------------------------------------------*/
+
 #include <assert.h>
 #include <ctype.h>
 #include <limits.h>
@@ -2287,8 +2291,14 @@ int main (int argc, char **argv) {
   if (!(files[1].file = fopen (files[1].name, "r")))
     die ("can not read incremental DRUP proof file '%s'", files[1].name);
 
-  message ("Interaction DRUP Checker Version 0.0.0");
-  message ("Copyright (c) 2023 University of Freiburg");
+  message ("Interaction DRUP Checker");
+  message ("Copyright (c) 2023 Armin Biere University of Freiburg");
+  if (idrup_gitid)
+    message ("Version %s %s", idrup_version, idrup_gitid);
+  else
+    message ("Version %s", idrup_version);
+  message ("Compiler %s", idrup_compiler);
+  message ("Build %s", idrup_build);
 
   init_signals ();
 

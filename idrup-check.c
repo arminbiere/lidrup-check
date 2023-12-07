@@ -178,11 +178,12 @@ static unsigned level; // Decision level.
 static int max_var;      // Maximum variable index imported.
 static size_t allocated; // Allocated variables.
 
-static bool *imported;         // Variable index imported?
-static unsigned *levels;       // Decision level of assigned variables.
-static struct clauses *matrix; // Mapping literals to watcher stacks.
-static signed char *values;    // Assignment of literal: -1, 0, or 1.
-static bool *marks;            // Marks of literals.
+static bool *imported;           // Variable index imported?
+static unsigned *levels;         // Decision level of assigned variables.
+static struct clauses *matrix;   // Mapping literals to watcher stacks.
+static struct clauses *inactive; // Inactive weakened clauses.
+static signed char *values;      // Assignment of literal: -1, 0, or 1.
+static bool *marks;              // Marks of literals.
 
 // Default preallocated trail.
 
@@ -826,6 +827,20 @@ static void increase_allocated (int idx) {
     matrix -= allocated;
     free (matrix);
     matrix = new_matrix;
+  }
+  {
+    struct clauses *new_inactive =
+        calloc (2 * new_allocated, sizeof *new_inactive);
+    if (!new_inactive)
+      out_of_memory ("reallocating inactive matrix of size %zu",
+                     new_allocated);
+    new_inactive += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_inactive[lit] = inactive[lit];
+    inactive -= allocated;
+    free (inactive);
+    inactive = new_inactive;
   }
   {
     signed char *new_values =
@@ -2119,6 +2134,16 @@ static void release_watches (void) {
   }
 }
 
+static void release_inactive (void) {
+  for (int lit = -max_var; lit <= max_var; lit++) {
+    struct clauses *watches = inactive + lit;
+    for (all_pointers (struct clause, c, *watches))
+      if (!c->input)
+        free_clause (c);
+    RELEASE (*watches);
+  }
+}
+
 static void release_empty_clauses (void) {
   for (all_pointers (struct clause, c, empty_clauses))
     free_clause (c);
@@ -2135,14 +2160,18 @@ static void release (void) {
   RELEASE (line);
   RELEASE (saved);
   RELEASE (query);
-  if (max_var)
+  if (max_var) {
     release_watches ();
+    release_inactive ();
+  }
   release_empty_clauses ();
   release_input_clauses ();
   free (trail.begin);
   free (control.begin);
   matrix -= allocated;
   free (matrix);
+  inactive -= allocated;
+  free (inactive);
   values -= allocated;
   free (values);
   marks -= allocated;

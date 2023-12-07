@@ -259,10 +259,6 @@ static void fuzz (uint64_t seed) {
   CCaDiCaL *solver = ccadical_init ();
   ccadical_set_option (solver, "idrup", 1);
   ccadical_set_option (solver, "binary", 0);
-#if 0
-  ccadical_set_option (solver, "ilb", 0); // TODO remove?
-  ccadical_set_option (solver, "ilbassumptions", 0); // TODO remove?
-#endif
   ccadical_trace_proof (solver, idrup, IDRUP);
   fputs ("p icnf\n", icnf);
   unsigned subset = (clauses + calls - 1) / calls;

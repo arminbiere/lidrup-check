@@ -230,6 +230,7 @@ static FILE *write_to_file (const char *path) {
 static void pick_literals (uint64_t *rng, int *lits, unsigned size) {
   for (unsigned j = 0; j != size; j++) {
   RESTART:
+    ;
     int idx = pick (rng, 1, vars);
     for (unsigned l = 0; l != j; l++)
       if (abs (lits[l]) == idx)

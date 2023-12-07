@@ -1623,9 +1623,11 @@ static void conclude_query (int res) {
   if (!querying)
     fatal_error ("query already concluded");
   if (verbosity > 0) {
-    double delta = wall_clock_time () - start_time;
-    verbose ("concluding query %zu with result %d taking %.2f seconds",
-             statistics.queries, res, delta);
+    double current = wall_clock_time ();
+    double delta = current - start_time;
+    verbose ("concluded query %zu with %d after %.2f seconds "
+             "in %.2f seconds",
+             statistics.queries, res, current, delta);
   }
   querying = false;
 }

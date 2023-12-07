@@ -2082,6 +2082,19 @@ static double process_time (void) {
   return res;
 }
 
+static double start_of_wall_clock_time;
+
+static double absolute_wall_clock_time (void) {
+  struct timeval tv;
+  if (gettimeofday (&tv, 0))
+    return 0;
+  return 1e-6 * tv.tv_usec + tv.tv_sec;
+}
+
+static double wall_clock_time () {
+  return absolute_wall_clock_time () - start_of_wall_clock_time;
+}
+
 static size_t maximum_resident_set_size (void) {
   struct rusage u;
   (void) getrusage (RUSAGE_SELF, &u);
@@ -2097,7 +2110,8 @@ static double average (double a, double b) { return b ? a / b : 0; }
 static double percent (double a, double b) { return average (100 * a, b); }
 
 static void print_statistics (void) {
-  double t = process_time ();
+  double p = process_time ();
+  double w = wall_clock_time ();
   printf ("c %-20s %20zu %12.2f per variable\n", "added:", statistics.added,
           average (statistics.added, statistics.imported));
   printf ("c %-20s %20zu %12.2f %% queries\n",
@@ -2122,7 +2136,7 @@ static void print_statistics (void) {
           "propagations:", statistics.propagations,
           average (statistics.propagations, statistics.decisions));
   printf ("c %-20s %20zu %12.2f per second\n",
-          "queries:", statistics.queries, average (t, statistics.queries));
+          "queries:", statistics.queries, average (w, statistics.queries));
   printf ("c %-20s %20zu %12.2f %% weakened\n",
           "restored:", statistics.restored,
           percent (statistics.restored, statistics.weakened));
@@ -2131,8 +2145,10 @@ static void print_statistics (void) {
           percent (statistics.weakened, statistics.inputs));
   fputs ("c\n", stdout);
   double m = mega_bytes ();
-  printf ("c %-20s %33.2f seconds\n", "process-time:", t);
-  printf ("c %-20s %25.2f MB\n", "bymaximum-resident-set-size:", m);
+  printf ("c %-20s %20.2f seconds %4.0f %% wall-clock\n",
+          "process-time:", p, percent (p, w));
+  printf ("c %-20s %20.2f seconds  100 %%\n", "wall-clock-time:", w);
+  printf ("c %-20s %11.2f MB\n", "bymaximum-resident-set-size:", m);
   fflush (stdout);
 }
 
@@ -2191,6 +2207,7 @@ static void init_signals (void) {
 /*------------------------------------------------------------------------*/
 
 int main (int argc, char **argv) {
+  start_of_wall_clock_time = absolute_wall_clock_time ();
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h") || !strcmp (arg, "--help")) {

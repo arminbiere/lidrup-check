@@ -29,7 +29,8 @@ debug=no
 symbols=undefined
 check=undefined
 
-OPTIONS=""
+CC="gcc"
+CFLAGS="-Wall"
 TARGETS="idrup-check"
 
 while [ $# -gt 0 ]
@@ -40,10 +41,7 @@ do
     -s | --symbols) symbols=yes;;
     -c | --check) check=yes;;
     -p | --pdf*) TARGETS="$TARGETS pdfs";;
-    -a | --asan) 
-      [ x"$OPTIONS" = x ] && OPTIONS=" "
-      OPTIONS="${OPTIONS} -fsanatize=address"
-      ;;
+    -a | --asan) CFLAGS="${CFLAGS} -fsanatize=address";;
     *) die "invalid option '$1' (try '-h')";;
   esac
   shift
@@ -97,15 +95,14 @@ fi
 [ $check = undefined ] && check=$debug
 [ $symbols = undefined ] && symbols=$debug
 
-COMPILE="gcc -Wall"
+[ $symbols = yes ] && CFLAGS="$CFLAGS -g -ggdb3"
+[ $debug = no ] && CFLAGS="$CFLAGS -O3"
+[ $check = no ] && CFLAGS="$CFLAGS -DNDEBUG"
 
-[ $check = no ] && COMPILE="$COMPILE -DNDEBUG"
-[ $symbols = yes ] && COMPILE="$COMPILE -g -ggdb3"
-[ $debug = no ] && COMPILE="$COMPILE -O3"
+msg "using '$CC $CFLAGS'"
 
-msg "using '$COMPILE'"
-
-sed -e "s#@COMPILE@#$COMPILE#" \
+sed -e "s#@CC@#$CC#" \
+    -e "s#@CFLAGS@#$CFLAGS#" \
     -e "s#@TARGETS@#$TARGETS#" \
     makefile.in > makefile
 msg "generated 'makefile' (run 'make')"

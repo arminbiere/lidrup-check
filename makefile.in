@@ -1,16 +1,26 @@
-COMPILE=@COMPILE@
+CC=@CC@
+CFLAGS=@CFLAGS@
+COMPILE=$(CC) $(CFLAGS)
 all: @TARGETS@
-idrup-check: idrup-check.c makefile
-	$(COMPILE) -o $@ $<
-idrup-fuzz: idrup-fuzz.c makefile ../cadical/src/ccadical.h ../cadical/build/libcadical.a
-	$(COMPILE) -o $@ -I../cadical/src $< ../cadical/build/libcadical.a -lstdc++ -lm
+idrup-check: idrup-check.o idrup-build.o makefile
+	$(COMPILE) -o $@ idrup-check.o idrup-build.o
+idrup-fuzz: idrup-fuzz.o idrup-build.o makefile ../cadical/build/libcadical.a
+	$(COMPILE) -o $@ idrup-check.o idrup-build.o ../cadical/build/libcadical.a -lstdc++ -lm
+idrup-build.o: idrup-build.c idrup-build.h idrup-config.h makefile
+	$(CC) $(CFLAGS) -c $<
+idrup-check.o: idrup-check.c idrup-build.h makefile
+	$(COMPILE) -c $<
+idrup-fuzz.o: idrup-fuzz.c idrup-build.h makefile ../cadical/src/ccadical.h
+	$(COMPILE) -c -I../cadical/src $<
+idrup-config.h: mkconfig.sh makefile
+	./mkconfig.sh > $@
 dots=$(wildcard *.dot)
 pdfs:$(dots:.dot=.pdf)
 .SUFFIXES: .dot .pdf
 .dot.pdf:
 	dot -Tpdf $< -o $@
 clean:
-	rm -f makefile idrup-check idrup-fuzz
+	rm -f makefile idrup-check idrup-fuzz idrup-config.h *.o
 	rm -f test/*log test/*err
 format:
 	clang-format -i idrup-check.c

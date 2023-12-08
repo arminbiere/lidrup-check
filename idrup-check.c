@@ -1147,9 +1147,7 @@ static void free_clause (struct clause *c) {
 
 /*------------------------------------------------------------------------*/
 
-// Watching is complex as we want ILB style clause addition when checking
-// and adding lemmas under assumptions.  Otherwise assumptions have to be be
-// repropagated with every learned clause.
+// Watching and connecting literals is implementing here.
 
 static void watch_literal (int lit, struct clause *c) {
   debug_clause (c, "watching %s in", debug_literal (lit));
@@ -1415,9 +1413,15 @@ IMPLICATION_CHECK_SUCCEEDED:
 /*------------------------------------------------------------------------*/
 
 #ifndef NDEBUG
+
+// This function used in assertion checking determines whether the literal
+// is valid in principle and fits the allocated size but does not require
+// that its variable has been imported before.
+
 bool valid_literal (int lit) {
   return lit && lit != INT_MIN && abs (lit) <= max_var;
 }
+
 #endif
 
 // Clauses are found by marking the literals in the line and then traversing
@@ -1868,7 +1872,18 @@ static void debug_state (const char *name) {
   NAME:               /* This is the actual state label. */ \
   debug_state (#NAME) /* And print entering state during logging */
 
+// The checker state machine implemented here should match the graphs in the
+// dot files and the corresponding pdf files, which come in three variants:
+// 'strict' (the default), 'pedantic' and 'relaxed'.  Currently not all
+// features of 'strict' are implemented yet (we still require as in
+// 'pedantic' mode that the interaction file is required to conclude with
+// 'm', 'v', 'u' or 'f' after an 's' status line but the headers can be
+// dropped). Nor are any of the 'relaxed' features working.  The next two
+// comment paragraphs are therefore only here for future reference.
+
 static int parse_and_check (void) {
+
+  // TODO Redundant at this point (see above).
 
   // By default any parse error or failed check will abort the program
   // with exit code '1' except in 'relaxed' parsing mode where parsing and
@@ -1876,6 +1891,8 @@ static int parse_and_check (void) {
   // a 's SATISFIABLE' status line. Without having such a model the
   // checker can not guarantee the input clauses to be satisfied at this
   // point.
+
+  // TODO Redundant at this point (see above).
 
   // For missing 'u' proof conclusion lines the checker might end up in
   // a similar situation (in case the user claims an unsatisfiable core

@@ -1,0 +1,51 @@
+digraph "idrup-check" {
+
+  INTERACTION_HEADER [shape=box];
+  INTERACTION_HEADER -> PROOF_HEADER [label=" p icnf",weight=2];
+
+  empty_legend1 [label="                     ",style=invis]
+  icnf_legend
+  [shape=box,color=darkgray,fontcolor=darkgray,style=dashed,label="reading from ICNF interaction file"]
+  //empty_legend2 [label="      ",style=invis]
+  idrup_legend
+  [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from IDRUP proof file"]
+
+  "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
+   "end-of-checking" -> INTERACTION_INPUT [label="  $    ",dir=back,fontcolor=darkgray,color=darkgray];
+
+  PROOF_HEADER -> INTERACTION_INPUT [label=" p idrup"]
+
+  INTERACTION_INPUT [shape=box];
+  INTERACTION_INPUT -> PROOF_INPUT [label=" i ",weight=2];
+  INTERACTION_INPUT -> PROOF_QUERY [label=" q ",weight=2,color=orange3,fontsize=20,fontcolor=orange3];
+
+  PROOF_INPUT -> INTERACTION_INPUT [label=" i ",weight=3];
+  PROOF_INPUT -> PROOF_INPUT [label=" l | d | r | w"];
+
+  PROOF_QUERY -> PROOF_CHECK [label=" q "];
+  PROOF_QUERY -> PROOF_QUERY [label=" l | d | r | w"];
+
+  PROOF_CHECK [fontsize=20];
+  PROOF_CHECK -> PROOF_CHECK [label=" l | d | r | w ",dir=back,fontsize=20];
+  PROOF_CHECK -> INTERACTION_SATISFIABLE [label=" s SATISFIABLE "];
+  PROOF_CHECK -> INTERACTION_UNSATISFIABLE [label=" s UNSATISFIABLE "];
+  PROOF_CHECK -> INTERACTION_UNKNOWN [label=" s UNKNOWN ",weight=2];
+
+  INTERACTION_UNSATISFIABLE [shape="box",label="INTERACTION_UNSATISFIABLE?"];
+  INTERACTION_UNSATISFIABLE -> INTERACTION_UNSATISFIED [label=" s UNSATISFIABLE "];
+
+  INTERACTION_SATISFIABLE [shape="box",label="INTERACTION_SATISFIABLE?"];
+  INTERACTION_SATISFIABLE -> INTERACTION_SATISFIED [label=" s SATISFIABLE "];
+
+  INTERACTION_SATISFIED [shape=box,label="INTERACTION_SATISFIED!"];
+  INTERACTION_SATISFIED -> PROOF_MODEL [label=" m "];
+
+  INTERACTION_UNSATISFIED [shape=box,label="INTERACTION_UNSATISFIED!"];
+  INTERACTION_UNSATISFIED -> PROOF_CORE [label=" u "];
+
+  INTERACTION_UNKNOWN [shape=box];
+  INTERACTION_UNKNOWN -> INTERACTION_INPUT [label="s UNKNOWN",weight=2];
+
+  PROOF_MODEL -> INTERACTION_INPUT [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+  PROOF_CORE -> INTERACTION_INPUT [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
+}

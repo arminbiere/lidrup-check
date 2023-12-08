@@ -1559,7 +1559,7 @@ static void restore_clause (struct clause *c) {
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
     if (marks[-lit])
-      check_error ("inconsistent '%d' line with both %d and %d", type, -lit,
+      check_error ("inconsistent '%c' line with both %d and %d", type, -lit,
                    lit);
     marks[lit] = true;
   }

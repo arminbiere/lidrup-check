@@ -1090,11 +1090,12 @@ static bool match_literals (struct ints *a, struct ints *b) {
 // Clause allocation and deallocation.
 
 static bool line_is_tautological () {
-  bool res = true;
+  bool res = false;
   for (all_elements (int, lit, line)) {
     assert (valid_literal (lit));
     if (!marks[lit]) {
-      res |= marks[-lit];
+      if (marks[-lit])
+	res = true;
       marks[lit] = true;
     }
   }

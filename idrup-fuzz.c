@@ -65,10 +65,10 @@ static const char * usage =
 
 // Global configuration options.
 
-static bool quiet;        // Force not output if enabled.
-static bool small = true; // Only use a small set of variables.
-static bool terminal;     // Erase printed lines if connected to a terminal.
-static bool keep_going;   // Keep going even if 'idrup-check' failed.
+static bool quiet;      // Force not output if enabled.
+static bool small;      // Only use a small set of variables.
+static bool terminal;   // Erase printed lines if connected to a terminal.
+static bool keep_going; // Keep going even if 'idrup-check' failed.
 
 static volatile uint64_t repetitions; // Number of repetitions if specified.
 static bool limited = false;          // If repetitions limits this is set.
@@ -230,6 +230,7 @@ static FILE *write_to_file (const char *path) {
 static void pick_literals (uint64_t *rng, int *lits, unsigned size) {
   for (unsigned j = 0; j != size; j++) {
   RESTART:
+    ;
     int idx = pick (rng, 1, vars);
     for (unsigned l = 0; l != j; l++)
       if (abs (lits[l]) == idx)
@@ -258,10 +259,6 @@ static void fuzz (uint64_t seed) {
   CCaDiCaL *solver = ccadical_init ();
   ccadical_set_option (solver, "idrup", 1);
   ccadical_set_option (solver, "binary", 0);
-#if 0
-  ccadical_set_option (solver, "ilb", 0); // TODO remove?
-  ccadical_set_option (solver, "ilbassumptions", 0); // TODO remove?
-#endif
   ccadical_trace_proof (solver, idrup, IDRUP);
   fputs ("p icnf\n", icnf);
   unsigned subset = (clauses + calls - 1) / calls;
@@ -303,15 +300,15 @@ static void fuzz (uint64_t seed) {
         fputs ("q 0\n", icnf), fflush (icnf);
         int res = ccadical_simplify (solver);
         if (res) {
-	  fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
+          fputs ("s UNSATISFIABLE\n", icnf), fflush (icnf);
+          ccadical_conclude (solver);
           assert (res == 20);
           if (!quiet)
             fputs ("*u", stdout), fflush (stdout);
           fputs ("u 0\n", icnf), fflush (icnf);
           goto CONTINUE_WITH_OUTER_LOOP;
-        }
-	else
-	  fputs ("s UNKNOWN\n", icnf), fflush (icnf);
+        } else
+          fputs ("s UNKNOWN\n", icnf), fflush (icnf);
       }
     }
     {

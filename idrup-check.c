@@ -11,6 +11,7 @@ static const char * idrup_check_usage =
 #ifndef NDEBUG
 "  -l | --logging  enable very verbose logging\n"
 #endif
+"  --version       print version and exit\n"
 "\n"
 
 "Exactly two files are read. The first '<icnf>' is an incremental CNF file\n"
@@ -44,6 +45,10 @@ static const char * idrup_check_usage =
 ;
 
 // clang-format on
+
+/*------------------------------------------------------------------------*/
+
+#include "idrup-build.h"
 
 /*------------------------------------------------------------------------*/
 
@@ -135,6 +140,13 @@ static struct file *file;
 
 static struct file *other_file;
 
+/*------------------------------------------------------------------------*/
+
+static bool querying;
+static double start_time;
+
+/*------------------------------------------------------------------------*/
+
 static struct ints line;  // Current line of integers parsed.
 static struct ints saved; // Saved line for checking.
 static struct ints query; // Saved query for checking.
@@ -166,11 +178,12 @@ static unsigned level; // Decision level.
 static int max_var;      // Maximum variable index imported.
 static size_t allocated; // Allocated variables.
 
-static bool *imported;         // Variable index imported?
-static unsigned *levels;       // Decision level of assigned variables.
-static struct clauses *matrix; // Mapping literals to watcher stacks.
-static signed char *values;    // Assignment of literal: -1, 0, or 1.
-static bool *marks;            // Marks of literals.
+static bool *imported;           // Variable index imported?
+static unsigned *levels;         // Decision level of assigned variables.
+static struct clauses *matrix;   // Mapping literals to watcher stacks.
+static struct clauses *inactive; // Inactive weakened clauses.
+static signed char *values;      // Assignment of literal: -1, 0, or 1.
+static bool *marks;              // Marks of literals.
 
 // Default preallocated trail.
 
@@ -340,6 +353,9 @@ static void out_of_memory (const char *, ...)
 
 static void fatal_error (const char *fmt, ...) {
   fputs ("idrup-check: fatal internal error: ", stderr);
+  if (file)
+    fprintf (stderr, "at line %zu in '%s': ", file->start_of_line,
+             file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -531,6 +547,50 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
   do { \
   } while (false)
 #endif
+
+/*------------------------------------------------------------------------*/
+
+// Resource usage code.
+
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+static double process_time (void) {
+  struct rusage u;
+  double res;
+  (void) getrusage (RUSAGE_SELF, &u);
+  res = u.ru_utime.tv_sec + 1e-6 * u.ru_utime.tv_usec;
+  res += u.ru_stime.tv_sec + 1e-6 * u.ru_stime.tv_usec;
+  return res;
+}
+
+static double start_of_wall_clock_time;
+
+static double absolute_wall_clock_time (void) {
+  struct timeval tv;
+  if (gettimeofday (&tv, 0))
+    return 0;
+  return 1e-6 * tv.tv_usec + tv.tv_sec;
+}
+
+static double wall_clock_time () {
+  return absolute_wall_clock_time () - start_of_wall_clock_time;
+}
+
+static size_t maximum_resident_set_size (void) {
+  struct rusage u;
+  (void) getrusage (RUSAGE_SELF, &u);
+  return ((size_t) u.ru_maxrss) << 10;
+}
+
+static double mega_bytes (void) {
+  return maximum_resident_set_size () / (double) (1 << 20);
+}
+
+static double average (double a, double b) { return b ? a / b : 0; }
+
+static double percent (double a, double b) { return average (100 * a, b); }
 
 /*------------------------------------------------------------------------*/
 
@@ -767,6 +827,20 @@ static void increase_allocated (int idx) {
     matrix -= allocated;
     free (matrix);
     matrix = new_matrix;
+  }
+  {
+    struct clauses *new_inactive =
+        calloc (2 * new_allocated, sizeof *new_inactive);
+    if (!new_inactive)
+      out_of_memory ("reallocating inactive matrix of size %zu",
+                     new_allocated);
+    new_inactive += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_inactive[lit] = inactive[lit];
+    inactive -= allocated;
+    free (inactive);
+    inactive = new_inactive;
   }
   {
     signed char *new_values =
@@ -1097,32 +1171,35 @@ static void unwatch_clause (struct clause *c) {
     REMOVE (struct clause *, empty_clauses, c);
 }
 
+static void connect_literal (int lit, struct clause *c) {
+  debug_clause (c, "connecting %d to", lit);
+  PUSH (inactive[lit], c);
+}
+
+static void disconnect_literal (int lit, struct clause *c) {
+  debug_clause (c, "disconnecting %d from", lit);
+  REMOVE (struct clause *, inactive[lit], c);
+}
+
 static int move_best_watch_to_front (int *lits, const int *const end) {
+  assert (!level);
   int watch = *lits;
   signed char watch_value = values[watch];
-  if (watch_value) {
-    unsigned watch_level = levels[abs (watch)];
+  if (watch_value < 0)
     for (int *p = lits + 1; p != end; p++) {
       int lit = *p;
       signed char lit_value = values[lit];
-      int idx = abs (lit);
-      unsigned lit_level = levels[idx];
-      if (!lit_value || watch_level < lit_level ||
-          (watch_level == lit_level && watch_value < lit_value)) {
-        *p = watch;
-        *lits = lit;
-        if (!lit_value)
-          return lit;
-        watch_level = lit_level;
-        watch_value = lit_value;
-        watch = lit;
-      }
+      if (lit_value < 0)
+        continue;
+      *lits = lit;
+      *p = watch;
+      return lit;
     }
-  }
   return watch;
 }
 
 static void watch_clause (struct clause *c) {
+  assert (!level);
   if (!c->size)
     PUSH (empty_clauses, c);
   else if (c->size == 1)
@@ -1134,33 +1211,6 @@ static void watch_clause (struct clause *c) {
     int lit1 = move_best_watch_to_front (lits + 1, end);
     debug ("first watch %s", debug_literal (lit0));
     debug ("second watch %s", debug_literal (lit1));
-    signed char val1 = values[lit1];
-    if (val1 >= 0)
-      debug ("second watch %s not falsified", debug_literal (lit1));
-    else {
-      signed char val0 = values[lit0];
-      int idx0 = abs (lit0);
-      int idx1 = abs (lit1);
-      unsigned level0 = levels[idx0];
-      unsigned level1 = levels[idx1];
-      if (level1 && (val0 <= 0 || level0 > level1)) {
-#ifndef NDEBUG
-        if (val0 <= 0)
-          debug ("second watch %s falsified at decision level %u "
-                 "and first watch %s not satisfied "
-                 "forces backtracking to decision level %u",
-                 debug_literal (lit1), level1, debug_literal (lit0),
-                 level1 - 1);
-        else
-          debug ("second watch %s falsified at decision level %u and "
-                 "first watch %s satisfied at larger decision level %u "
-                 "forces backtracking to decision level %u",
-                 debug_literal (lit1), level1, debug_literal (lit0), level1,
-                 level1 - 1);
-#endif
-        backtrack (level1 - 1);
-      }
-    }
     watch_literal (lit0, c);
     watch_literal (lit1, c);
   }
@@ -1266,18 +1316,13 @@ static bool propagate (void) {
         watch_literal (replacement, c);
         q--;
       } else if (!other_watch_value) {
-        if (c->weakened)
-          debug_clause (c, "ignoring forcing");
-        else
-          assign_forced (other_watch, c);
+        assert (!c->weakened);
+        assign_forced (other_watch, c);
       } else {
         assert (other_watch_value < 0);
-        if (c->weakened)
-          debug_clause (c, "ignoring conflict");
-        else {
-          res = false;
-          debug_clause (c, "conflict");
-        }
+        assert (!c->weakened);
+        debug_clause (c, "conflict");
+        res = false;
       }
     }
     while (p != watches_end)
@@ -1397,7 +1442,7 @@ static struct clause *find_non_empty_clause (bool weakened) {
   assert (size);
   mark_line ();
   for (all_elements (int, lit, line)) {
-    struct clauses *watches = matrix + lit;
+    struct clauses *watches = (weakened ? inactive : matrix) + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size != size)
         continue;
@@ -1434,6 +1479,29 @@ static struct clause *find_weakened_clause (void) {
   return find_clause (true);
 }
 
+static int
+move_least_occurring_inactive_literal_to_front (struct clause *c) {
+  assert (c->size);
+  int *lits = c->lits;
+  int res = lits[0];
+  size_t res_occurrences = SIZE (inactive[res]);
+  const int *const end = lits + c->size;
+  for (int *p = lits + 1; p != end; p++) {
+    int other = *p;
+    size_t other_occurrences = SIZE (inactive[other]);
+    if (other_occurrences >= res_occurrences)
+      continue;
+    *p = res;
+    res = other;
+    res_occurrences = other_occurrences;
+  }
+  lits[0] = res;
+  assert (res);
+  debug ("literal %s occurs only %zu times", debug_literal (res),
+         res_occurrences);
+  return res;
+}
+
 /*------------------------------------------------------------------------*/
 
 // This section has all the low-level checks.
@@ -1452,42 +1520,53 @@ static void delete_clause (struct clause *c) {
 static void weaken_clause (struct clause *c) {
   assert (!c->weakened);
   debug_clause (c, "weakening");
+  unwatch_clause (c);
   c->weakened = true;
+  if (c->size) {
+    int lit = move_least_occurring_inactive_literal_to_front (c);
+    connect_literal (lit, c);
+  }
   statistics.weakened++;
 }
 
 static void restore_clause (struct clause *c) {
+  assert (!level);
   assert (c->weakened);
   debug_clause (c, "restoring");
-  c->weakened = false;
-
-  assert (!level);
-
-  // TODO add an internal checker that watches are good or unwatch
-  // weakened clauses during weakening and rewatch them here.  For the later
-  // alternative remove the checks on ignoring forced assignments and
-  // conflicts by weakened clauses and replace it by an assertion instead.
-
-  // TODO only trigger if repropagation is necessary.
-
-  if (trail.begin < trail.propagate) {
-    assert (!level);
-    debug ("forcing repropagation of all literals after restoring clause");
-    trail.propagate = trail.begin;
+  if (c->size) {
+    int *lits = begin_literals (c);
+    disconnect_literal (*lits, c);
+    watch_clause (c);
+    int lit0 = lits[0];
+    int val0 = values[lit0];
+    if (c->size > 1) {
+      if (val0 <= 0) {
+        int lit1 = lits[1];
+        int val1 = values[lit1];
+        if (val1 < 0 || (!val1 && val0 < 0)) {
+          if (trail.begin < trail.propagate) {
+            assert (!level);
+            debug ("forcing repropagation after restoring clause");
+            trail.propagate = trail.begin;
+          }
+        }
+      }
+    } else
+      assert (val0 > 0);
   }
-
+  c->weakened = false;
   statistics.restored++;
 }
 
 // Check that there are no clashing literals (both positive and negative
-// occurrence of a variable) in the current line.  This is a mandatory check
-// for conclusions, i.e., for both 'm' models and 'u' core lines.
+// occurrence of a variable) in the current line.  This is a mandatory
+// check for conclusions, i.e., for both 'm' models and 'u' core lines.
 
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
     assert (valid_literal (lit));
     if (marks[-lit])
-      check_error ("inconsistent '%d' line with both %d and %d", type, -lit,
+      check_error ("inconsistent '%c' line with both %d and %d", type, -lit,
                    lit);
     marks[lit] = true;
   }
@@ -1495,9 +1574,9 @@ static void check_line_consistency (int type) {
   debug ("line consists of consistent literals");
 }
 
-// Check that there are no literals in the current line which clash with one
-// literal in the saved line (a variable is not allowed to occur positively
-// in one and negatively in the other line).
+// Check that there are no literals in the current line which clash with
+// one literal in the saved line (a variable is not allowed to occur
+// positively in one and negatively in the other line).
 
 static void check_line_consistent_with_saved (int type) {
   mark_line ();
@@ -1563,6 +1642,29 @@ static void check_literals_imported (int type) {
   debug ("checking literals imported");
   for (all_elements (int, lit, line))
     check_literal_imported (type, lit);
+}
+
+/*------------------------------------------------------------------------*/
+
+static void start_query (void) {
+  if (querying)
+    fatal_error ("query already started");
+  if (verbosity > 0)
+    start_time = wall_clock_time ();
+  querying = true;
+}
+
+static void conclude_query (int res) {
+  if (!querying)
+    fatal_error ("query already concluded");
+  if (verbosity > 0) {
+    double current = wall_clock_time ();
+    double delta = current - start_time;
+    verbose ("concluded query %zu with %d after %.2f seconds "
+             "in %.2f seconds",
+             statistics.queries, res, current, delta);
+  }
+  querying = false;
 }
 
 /*------------------------------------------------------------------------*/
@@ -1664,6 +1766,7 @@ static void check_line_satisfies_query (int type) {
                    lit, start_of_query, interactions->name);
   unmark_line ();
   (void) type;
+  debug ("line literals satisfy query");
 }
 
 static void conclude_satisfiable_query_with_model (int type) {
@@ -1677,6 +1780,7 @@ static void conclude_satisfiable_query_with_model (int type) {
   statistics.models++;
   assert (!level);
   debug ("satisfiable query concluded");
+  conclude_query (10);
 }
 
 static void check_core_subset_of_query (int type) {
@@ -1686,25 +1790,60 @@ static void check_core_subset_of_query (int type) {
       check_error ("core literal %d not in query at line %zu in '%s'", lit,
                    start_of_query, interactions->name);
   unmark_query ();
+  debug ("core subset of query");
+  (void) type;
+}
+
+static void check_line_variables_subset_of_query (int type) {
+  mark_query ();
+  for (all_elements (int, lit, line))
+    if (!marks[lit] && !marks[-lit])
+      check_error ("literal %d nor %d in query at line %zu in '%s'", lit,
+                   -lit, start_of_query, interactions->name);
+  unmark_query ();
+  debug ("line variables subset of query");
+  (void) type;
+}
+
+static void check_saved_failed_literals_match_core (int type) {
+  for (all_elements (int, lit, line))
+    marks[lit] = true;
+  for (all_elements (int, lit, saved))
+    if (marks[-lit])
+      check_error (
+          "literal %d claimed not to be a failed literal "
+          "(as it occurs negatively as %d in the 'f' line %zu in '%s') "
+          "is in this unsatisfiable core 'u' line of the proof",
+          -lit, lit, start_of_saved, interactions->name);
+  unmark_line ();
+  for (all_elements (int, lit, line))
+    marks[lit] = false;
+  (void) type;
 }
 
 static void conclude_unsatisfiable_query_with_core (int type) {
   debug ("concluding satisfiable query");
   check_line_propagation_yields_conflict (type);
-  assert (saved_type == 'u'); // TODO what about 'f'?
   check_core_subset_of_query (type);
-  match_saved (type, "unsatisfiable core");
+  if (saved_type == 'u')
+    match_saved (type, "unsatisfiable core");
+  else {
+    assert (saved_type == 'f');
+    check_saved_failed_literals_match_core (type);
+  }
   statistics.conclusions++;
   statistics.cores++;
   assert (!level || inconsistent);
   debug ("unsatisfiable query concluded");
+  (void) type;
+  conclude_query (20);
 }
 
 /*------------------------------------------------------------------------*/
 
-// The main parsing and checking routine can be found below.  It is a simple
-// state-machine implemented with GOTO style programming and uses the
-// following function to show state changes during logging.
+// The main parsing and checking routine can be found below.  It is a
+// simple state-machine implemented with GOTO style programming and uses
+// the following function to show state changes during logging.
 
 #ifndef NDEBUG
 
@@ -1786,6 +1925,7 @@ static int parse_and_check (void) {
       import_and_add_input_clause (type);
       goto PROOF_INPUT;
     } else if (type == 'q') {
+      start_query ();
       import_literals ();
       save_line (type);
       save_query ();
@@ -1898,9 +2038,10 @@ static int parse_and_check (void) {
     STATE (INTERACTION_UNKNOWN);
     set_file (interactions);
     int type = next_line (0);
-    if (type == 's' && string == UNKNOWN)
+    if (type == 's' && string == UNKNOWN) {
+      conclude_query (0);
       goto INTERACTION_INPUT;
-    else if (type == 's') {
+    } else if (type == 's') {
       parse_error ("unexpected 's %s' line (expected 's UNKNOWN')", string);
       goto UNREACHABLE;
     } else {
@@ -1944,7 +2085,8 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'f') {
-      check_error ("'f' lines not support in interaction file yet");
+      check_line_consistency (type);
+      check_line_variables_subset_of_query (type);
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {
@@ -1985,8 +2127,8 @@ static int parse_and_check (void) {
 // Clean-up functions.
 
 // Without a global list of clauses we traverse watch lists during
-// deallocation of clauses and only deallocate a clauses if we visit it the
-// second time through its larger watch.
+// deallocation of clauses and only deallocate a clauses if we visit it
+// the second time through its larger watch.
 
 static void release_watches (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
@@ -2007,6 +2149,16 @@ static void release_watches (void) {
   }
 }
 
+static void release_inactive (void) {
+  for (int lit = -max_var; lit <= max_var; lit++) {
+    struct clauses *watches = inactive + lit;
+    for (all_pointers (struct clause, c, *watches))
+      if (!c->input)
+        free_clause (c);
+    RELEASE (*watches);
+  }
+}
+
 static void release_empty_clauses (void) {
   for (all_pointers (struct clause, c, empty_clauses))
     free_clause (c);
@@ -2023,14 +2175,18 @@ static void release (void) {
   RELEASE (line);
   RELEASE (saved);
   RELEASE (query);
-  if (max_var)
+  if (max_var) {
     release_watches ();
+    release_inactive ();
+  }
   release_empty_clauses ();
   release_input_clauses ();
   free (trail.begin);
   free (control.begin);
   matrix -= allocated;
   free (matrix);
+  inactive -= allocated;
+  free (inactive);
   values -= allocated;
   free (values);
   marks -= allocated;
@@ -2041,37 +2197,9 @@ static void release (void) {
 
 /*------------------------------------------------------------------------*/
 
-// Resource usage and statistics printing code.
-
-#include <sys/resource.h>
-#include <sys/time.h>
-#include <unistd.h>
-
-static double process_time (void) {
-  struct rusage u;
-  double res;
-  (void) getrusage (RUSAGE_SELF, &u);
-  res = u.ru_utime.tv_sec + 1e-6 * u.ru_utime.tv_usec;
-  res += u.ru_stime.tv_sec + 1e-6 * u.ru_stime.tv_usec;
-  return res;
-}
-
-static size_t maximum_resident_set_size (void) {
-  struct rusage u;
-  (void) getrusage (RUSAGE_SELF, &u);
-  return ((size_t) u.ru_maxrss) << 10;
-}
-
-static double mega_bytes (void) {
-  return maximum_resident_set_size () / (double) (1 << 20);
-}
-
-static double average (double a, double b) { return b ? a / b : 0; }
-
-static double percent (double a, double b) { return average (100 * a, b); }
-
 static void print_statistics (void) {
-  double t = process_time ();
+  double p = process_time ();
+  double w = wall_clock_time ();
   printf ("c %-20s %20zu %12.2f per variable\n", "added:", statistics.added,
           average (statistics.added, statistics.imported));
   printf ("c %-20s %20zu %12.2f %% queries\n",
@@ -2096,7 +2224,7 @@ static void print_statistics (void) {
           "propagations:", statistics.propagations,
           average (statistics.propagations, statistics.decisions));
   printf ("c %-20s %20zu %12.2f per second\n",
-          "queries:", statistics.queries, average (t, statistics.queries));
+          "queries:", statistics.queries, average (w, statistics.queries));
   printf ("c %-20s %20zu %12.2f %% weakened\n",
           "restored:", statistics.restored,
           percent (statistics.restored, statistics.weakened));
@@ -2105,8 +2233,10 @@ static void print_statistics (void) {
           percent (statistics.weakened, statistics.inputs));
   fputs ("c\n", stdout);
   double m = mega_bytes ();
-  printf ("c %-20s %33.2f seconds\n", "process-time:", t);
-  printf ("c %-20s %25.2f MB\n", "bymaximum-resident-set-size:", m);
+  printf ("c %-20s %20.2f seconds %4.0f %% wall-clock\n",
+          "process-time:", p, percent (p, w));
+  printf ("c %-20s %20.2f seconds  100 %%\n", "wall-clock-time:", w);
+  printf ("c %-20s %11.2f MB\n", "bymaximum-resident-set-size:", m);
   fflush (stdout);
 }
 
@@ -2165,6 +2295,7 @@ static void init_signals (void) {
 /*------------------------------------------------------------------------*/
 
 int main (int argc, char **argv) {
+  start_of_wall_clock_time = absolute_wall_clock_time ();
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h") || !strcmp (arg, "--help")) {
@@ -2180,6 +2311,8 @@ int main (int argc, char **argv) {
 #else
       die ("invalid line option '%s' (compiled without debugging)", arg);
 #endif
+    else if (!strcmp (arg, "--version"))
+      printf ("%s\n", idrup_version), exit (0);
     else if (!strcmp (arg, "--strict"))
       mode = strict;
     else if (!strcmp (arg, "--relaxed"))
@@ -2205,8 +2338,14 @@ int main (int argc, char **argv) {
   if (!(files[1].file = fopen (files[1].name, "r")))
     die ("can not read incremental DRUP proof file '%s'", files[1].name);
 
-  message ("Interaction DRUP Checker Version 0.0.0");
-  message ("Copyright (c) 2023 University of Freiburg");
+  message ("Interaction DRUP Checker");
+  message ("Copyright (c) 2023 Armin Biere University of Freiburg");
+  if (idrup_gitid)
+    message ("Version %s %s", idrup_version, idrup_gitid);
+  else
+    message ("Version %s", idrup_version);
+  message ("Compiler %s", idrup_compiler);
+  message ("Build %s", idrup_build);
 
   init_signals ();
 

@@ -1369,6 +1369,12 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 /*------------------------------------------------------------------------*/
 
+#ifndef NDEBUG
+bool valid_literal (int lit) {
+  return lit && lit != INT_MIN && abs (lit) <= max_var;
+}
+#endif
+
 // Clauses are found by marking the literals in the line and then traversing
 // the watches of them to find all clause of the same size with all literals
 // marked and active (not weakened).  It might be possible to speed up this
@@ -1479,6 +1485,7 @@ static void restore_clause (struct clause *c) {
 
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
+    assert (valid_literal (lit));
     if (marks[-lit])
       check_error ("inconsistent '%d' line with both %d and %d", type, -lit,
                    lit);
@@ -1495,6 +1502,7 @@ static void check_line_consistency (int type) {
 static void check_line_consistent_with_saved (int type) {
   mark_line ();
   for (all_elements (int, lit, saved)) {
+    assert (valid_literal (lit));
     if (marks[-lit])
       check_error ("inconsistent '%d' line on %d with line %zu in '%s'",
                    type, lit, start_of_saved, other_file->name);
@@ -1506,9 +1514,11 @@ static void check_line_consistent_with_saved (int type) {
 static void check_satisfied_clause (int type, struct clause *c) {
   if (c->tautological)
     return;
-  for (all_literals (lit, c))
+  for (all_literals (lit, c)) {
+    assert (valid_literal (lit));
     if (marks[lit])
       return;
+  }
   fflush (stdout);
   fprintf (stderr,
            "idrup-check: error: model at line %zu in '%s' "
@@ -1849,7 +1859,7 @@ static int parse_and_check (void) {
       goto INTERACTION_SATISFIABLE;
     else if (string == UNSATISFIABLE)
       goto INTERACTION_UNSATISFIABLE;
-    else { 
+    else {
       assert (string == UNKNOWN);
       goto INTERACTION_UNKNOWN;
     }
@@ -1891,8 +1901,7 @@ static int parse_and_check (void) {
     if (type == 's' && string == UNKNOWN)
       goto INTERACTION_INPUT;
     else if (type == 's') {
-      parse_error ("unexpected 's %s' line (expected 's UNKNOWN')",
-                   string);
+      parse_error ("unexpected 's %s' line (expected 's UNKNOWN')", string);
       goto UNREACHABLE;
     } else {
       unexpected_line (type, "'s UNKNOWN'");

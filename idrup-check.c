@@ -94,10 +94,10 @@ struct clause {
   size_t id;
   size_t lineno;
 #endif
-  unsigned size;
   bool input;
   bool weakened;
   bool tautological;
+  unsigned size;
   int lits[];
 };
 

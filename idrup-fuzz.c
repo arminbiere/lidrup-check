@@ -8,7 +8,7 @@ static const char * usage =
 "\n"
 "  -h | --help          print this command line option summary\n"
 "  -q | --quiet         be quiet and do not print any messages\n"
-"  -n | --no-terminal   assume stdout is not connected to a terminal\n"
+"  -n | --no-terminal   assume 'stdout' is not connected to a terminal\n"
 "  -c | --continue      continue going even if test failed\n"
 "  -s | --small         restrict range of variables\n"
 "\n"

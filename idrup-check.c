@@ -2098,7 +2098,7 @@ static int parse_and_check (void) {
       save_line (type);
       goto PROOF_CORE;
     } else {
-      unexpected_line (type, "'f' | 'u'");
+      unexpected_line (type, "'f' or 'u'");
       goto UNREACHABLE;
     }
   }

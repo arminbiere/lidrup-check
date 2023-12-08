@@ -1053,17 +1053,33 @@ static void backtrack (unsigned new_level) {
 
 /*------------------------------------------------------------------------*/
 
+#ifndef NDEBUG
+
+// This function used in assertion checking determines whether the literal
+// is valid in principle and fits the allocated size but does not require
+// that its variable has been imported before.
+
+bool valid_literal (int lit) {
+  return lit && lit != INT_MIN && abs (lit) <= max_var;
+}
+
+#endif
+
+/*------------------------------------------------------------------------*/
+
 // We use a literal map which maps literals to true to mark literals in
 // 'line', 'saved' and 'query' which allows us to check set equivalence
 // ('match_literals') or subset properties ('subset_literals').
 
 static void mark_literal (int lit) {
   // debug ("marking %s", debug_literal (lit));
+  assert (valid_literal (lit));
   marks[lit] = true;
 }
 
 static void unmark_literal (int lit) {
   // debug ("unmarking %s", debug_literal (lit));
+  assert (valid_literal (lit));
   marks[lit] = false;
 }
 
@@ -1086,11 +1102,13 @@ static void unmark_query (void) { unmark_literals (&query); }
 static bool subset_literals (struct ints *a, struct ints *b) {
   mark_literals (b);
   bool res = true;
-  for (all_elements (int, lit, *a))
+  for (all_elements (int, lit, *a)) {
+    assert (valid_literal (lit));
     if (!marks[lit]) {
       res = false;
       break;
     }
+  }
   unmark_literals (b);
   return res;
 }
@@ -1106,8 +1124,11 @@ static bool match_literals (struct ints *a, struct ints *b) {
 static bool line_is_tautological () {
   bool res = true;
   for (all_elements (int, lit, line)) {
-    res |= marks[-lit];
-    marks[lit] = true;
+    assert (valid_literal (lit));
+    if (!marks[lit]) {
+      res |= marks[-lit];
+      marks[lit] = true;
+    }
   }
   unmark_line ();
   return res;
@@ -1354,11 +1375,12 @@ static void save_query (void) {
 /*------------------------------------------------------------------------*/
 
 // This is the essential checking function which checks that added lemmas
-// are indeed reverse unit propagation (RUP) implied and unsatisfiable cores
-// are indeed unsatisfiable.  The first case requires the literals in the
-// current line to be assumed negatively while the second case requires them
-// to be assigned positively, as determined by the last 'sign' argument.
-// The other arguments are for context sensitive logging and error messages.
+// are indeed reverse unit propagation (RUP) implied and unsatisfiable
+// cores are indeed unsatisfiable.  The first case requires the literals
+// in the current line to be assumed negatively while the second case
+// requires them to be assigned positively, as determined by the last
+// 'sign' argument. The other arguments are for context sensitive logging
+// and error messages.
 
 static void check_implied (int type, const char *type_str, int sign) {
 
@@ -1380,8 +1402,8 @@ static void check_implied (int type, const char *type_str, int sign) {
     return;
   }
 
-  // After all root-level units have been propagated assume all literals in
-  // the line as decision if 'sign=1' or their negation if 'sign=-1'.
+  // After all root-level units have been propagated assume all literals
+  // in the line as decision if 'sign=1' or their negation if 'sign=-1'.
 
   debug ("checking %s line is implied", type_str);
   for (all_elements (int, lit, line)) {
@@ -1412,22 +1434,11 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 /*------------------------------------------------------------------------*/
 
-#ifndef NDEBUG
-
-// This function used in assertion checking determines whether the literal
-// is valid in principle and fits the allocated size but does not require
-// that its variable has been imported before.
-
-bool valid_literal (int lit) {
-  return lit && lit != INT_MIN && abs (lit) <= max_var;
-}
-
-#endif
-
-// Clauses are found by marking the literals in the line and then traversing
-// the watches of them to find all clause of the same size with all literals
-// marked and active (not weakened).  It might be possible to speed up this
-// part with hash table, which on the other hand would require more space.
+// Clauses are found by marking the literals in the line and then
+// traversing the watches of them to find all clause of the same size with
+// all literals marked and active (not weakened).  It might be possible to
+// speed up this part with hash table, which on the other hand would
+// require more space.
 
 static struct clause *find_empty_clause (bool weakened) {
   assert (EMPTY (line));
@@ -1776,6 +1787,7 @@ static void check_line_satisfies_query (int type) {
 static void conclude_satisfiable_query_with_model (int type) {
   debug ("concluding satisfiable query");
   assert (!inconsistent);
+  import_literals ();
   check_line_consistency (type);
   check_line_satisfies_query (type);
   check_line_satisfies_input_clauses (type);
@@ -1872,14 +1884,14 @@ static void debug_state (const char *name) {
   NAME:               /* This is the actual state label. */ \
   debug_state (#NAME) /* And print entering state during logging */
 
-// The checker state machine implemented here should match the graphs in the
-// dot files and the corresponding pdf files, which come in three variants:
-// 'strict' (the default), 'pedantic' and 'relaxed'.  Currently not all
-// features of 'strict' are implemented yet (we still require as in
-// 'pedantic' mode that the interaction file is required to conclude with
-// 'm', 'v', 'u' or 'f' after an 's' status line but the headers can be
-// dropped). Nor are any of the 'relaxed' features working.  The next two
-// comment paragraphs are therefore only here for future reference.
+// The checker state machine implemented here should match the graphs in
+// the dot files and the corresponding pdf files, which come in three
+// variants: 'strict' (the default), 'pedantic' and 'relaxed'.  Currently
+// not all features of 'strict' are implemented yet (we still require as
+// in 'pedantic' mode that the interaction file is required to conclude
+// with 'm', 'v', 'u' or 'f' after an 's' status line but the headers can
+// be dropped). Nor are any of the 'relaxed' features working.  The next
+// two comment paragraphs are therefore only here for future reference.
 
 static int parse_and_check (void) {
 
@@ -1965,6 +1977,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i') {
+      import_literals ();
       match_saved (type, "input");
       goto INTERACTION_INPUT;
     } else if (type == 'p') {
@@ -1986,6 +1999,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'q') {
+      import_literals ();
       match_saved (type, "query");
       goto PROOF_CHECK;
     } else if (type == 'p') {
@@ -2071,10 +2085,12 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'v') {
+      import_literals ();
       check_line_consistency (type);
       save_line (type);
       goto PROOF_MODEL;
     } else if (type == 'm') {
+      import_literals ();
       check_line_consistency (type);
       check_line_satisfies_query (type);
       check_line_satisfies_input_clauses (type);
@@ -2090,6 +2106,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'm') {
+      import_literals ();
       conclude_satisfiable_query_with_model (type);
       goto INTERACTION_INPUT;
     } else {
@@ -2102,11 +2119,13 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'f') {
+      import_literals ();
       check_line_consistency (type);
       check_line_variables_subset_of_query (type);
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {
+      import_literals ();
       check_line_propagation_yields_conflict (type);
       save_line (type);
       goto PROOF_CORE;
@@ -2120,6 +2139,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'u') {
+      import_literals ();
       conclude_unsatisfiable_query_with_core (type);
       goto INTERACTION_INPUT;
     } else {

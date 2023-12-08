@@ -3,6 +3,7 @@ i -1 2 0
 i -1 -2 0
 q 0
 s SATISFIABLE
+m -1 2 0
 q 1 0
 s UNSATISFIABLE
 u 1 0

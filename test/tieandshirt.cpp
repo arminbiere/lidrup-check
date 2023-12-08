@@ -8,15 +8,15 @@ int main () {
   solver.set ("binary", 0);
   solver.trace_proof ("tieandshirt.idrup");
   // tie = 1, shirt = 2;
-  solver.clause (1, 2);
-  solver.clause (-1, 2);
-  solver.clause (-1, -2);
+  solver.clause (1, 2);   // tie | shirt
+  solver.clause (-1, 2);  // tier -> shirt
+  solver.clause (-1, -2); // !(tier & shirt)
   int res = solver.solve ();
   assert (res == 10); // SATISFIABLE
-  solver.assume (1);
+  solver.assume (1);  // Can I have a tie?
   res = solver.solve ();
-  assert (res == 20); // UNSATISFIABLE
-  res = solver.failed (1);
-  assert (res); // 'tie' in the core
+  assert (res == 20);      // UNSATISFIABLE
+  res = solver.failed (1); // No, and its the tie.
+  assert (res);            // 'tie' in the core
   return 0;
 }

@@ -21,7 +21,7 @@ pdfs:$(dots:.dot=.pdf)
 	dot -Tpdf $< -o $@
 clean:
 	rm -f makefile idrup-check idrup-fuzz idrup-config.h *.o
-	rm -f test/*log test/*err
+	make -C test clean
 format:
 	clang-format -i idrup-check.c
 test: all

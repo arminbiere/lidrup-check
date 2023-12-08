@@ -13,7 +13,9 @@ int main () {
   solver.clause (-1, -2); // !(tier & shirt)
   int res = solver.solve ();
   assert (res == 10); // SATISFIABLE
-  solver.assume (1);  // Can I have a tie?
+  res = solver.val (1), assert (res == -1);
+  res = solver.val (2), assert (res == 2);
+  solver.assume (1); // Can I have a tie?
   res = solver.solve ();
   assert (res == 20);      // UNSATISFIABLE
   res = solver.failed (1); // No, and its the tie.

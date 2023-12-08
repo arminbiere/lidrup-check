@@ -194,8 +194,6 @@ static struct {
 
 // Maps decision level to trail heights.
 
-static struct { int **begin, **end; } control;
-
 static bool inconsistent; // Empty clause derived.
 
 // Need to store empty clauses on a separate stack as they are not watched.
@@ -898,14 +896,6 @@ static void increase_allocated (int idx) {
     trail.propagate = trail.begin + propagated;
     allocated = new_allocated;
   }
-  {
-    size_t size = SIZE (control);
-    control.begin =
-        realloc (control.begin, new_allocated * sizeof *control.begin);
-    if (!control.begin)
-      out_of_memory ("reallocating control of size %zu", new_allocated);
-    control.end = control.begin + size;
-  }
 }
 
 static void increase_max_var (int idx) {
@@ -962,26 +952,6 @@ static void pop_trail (int *new_end) {
   }
 }
 
-static void push_control (void) {
-  level++;
-  debug ("increased decision level to %u", level);
-  assert (control.end < control.end + max_var);
-  *control.end++ = trail.end;
-}
-
-static int *peek_control (unsigned new_level) {
-  assert (new_level < level);
-  return PEEK (control, new_level);
-}
-
-static void pop_control (unsigned new_level) {
-  assert (new_level < level);
-  assert (new_level < SIZE (control));
-  level = new_level;
-  control.end = control.begin + new_level;
-  debug ("decreased decision level to %u", level);
-}
-
 /*------------------------------------------------------------------------*/
 
 // We have four contexts in which we assign variables.
@@ -1013,13 +983,13 @@ static void assign_forced (int lit, struct clause *c) {
 }
 
 static void assign_decision (int lit) {
-  push_control ();
   push_trail (lit);
   values[-lit] = -1;
   values[lit] = 1;
   int idx = abs (lit);
   levels[idx] = level;
   statistics.decisions++;
+  level++;
   debug ("assign %s as decision", debug_literal (lit));
 }
 
@@ -1027,10 +997,9 @@ static void assign_decision (int lit) {
 
 // Variables are only unassigned during backtracking.
 
-static void backtrack (unsigned new_level) {
-  assert (new_level < level);
-  debug ("backtracking to decision level %u", new_level);
-  int *new_trail_end = peek_control (new_level);
+static void backtrack (void) {
+  debug ("backtracking to root decision level");
+  int *new_trail_end = trail.units;
   int *p = trail.end;
   while (p != new_trail_end) {
     int lit = *--p;
@@ -1040,14 +1009,13 @@ static void backtrack (unsigned new_level) {
 #ifndef NDEBUG
     int idx = abs (lit);
     unsigned lit_level = levels[idx];
-    assert (new_level < lit_level);
     unsigned saved_level = level;
     level = lit_level;
     debug ("unassign %s", debug_literal (lit));
     level = saved_level;
 #endif
   }
-  pop_control (new_level);
+  level = 0;
   pop_trail (new_trail_end);
 }
 
@@ -1267,7 +1235,7 @@ static void add_clause (bool input) {
   else if (unit) {
     if (level) {
       debug_clause (c, "added root-level unit");
-      backtrack (0);
+      backtrack ();
     }
     assign_root_level_unit (unit);
   } else if (!falsified)
@@ -1359,7 +1327,7 @@ static bool propagate (void) {
 static void reset_checker (void) {
   if (!inconsistent && level) {
     debug ("resetting assignment");
-    backtrack (0);
+    backtrack ();
   } else
     debug ("no need to reset assignment");
 }
@@ -1426,7 +1394,7 @@ static void check_implied (int type, const char *type_str, int sign) {
 IMPLICATION_CHECK_SUCCEEDED:
 
   if (level)
-    backtrack (0);
+    backtrack ();
 
   debug ("%s implication check succeeded", type_str);
   (void) type_str;
@@ -2219,7 +2187,6 @@ static void release (void) {
   release_empty_clauses ();
   release_input_clauses ();
   free (trail.begin);
-  free (control.begin);
   matrix -= allocated;
   free (matrix);
   inactive -= allocated;

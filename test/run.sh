@@ -49,6 +49,8 @@ run 0 full2
 run 0 full3
 run 0 ifull1
 run 0 ifull2
+run 0 ifull3
+run 0 tieandshirt
 run 0 inputlearn1
 run 0 dp2
 run 0 dp3

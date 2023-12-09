@@ -99,10 +99,10 @@ struct clause {
   size_t id;
   size_t lineno;
 #endif
-  unsigned size;
   bool input;
   bool weakened;
   bool tautological;
+  unsigned size;
   int lits[];
 };
 
@@ -193,8 +193,6 @@ static struct {
 } trail;
 
 // Maps decision level to trail heights.
-
-static struct { int **begin, **end; } control;
 
 static bool inconsistent; // Empty clause derived.
 
@@ -898,14 +896,6 @@ static void increase_allocated (int idx) {
     trail.propagate = trail.begin + propagated;
     allocated = new_allocated;
   }
-  {
-    size_t size = SIZE (control);
-    control.begin =
-        realloc (control.begin, new_allocated * sizeof *control.begin);
-    if (!control.begin)
-      out_of_memory ("reallocating control of size %zu", new_allocated);
-    control.end = control.begin + size;
-  }
 }
 
 static void increase_max_var (int idx) {
@@ -962,26 +952,6 @@ static void pop_trail (int *new_end) {
   }
 }
 
-static void push_control (void) {
-  level++;
-  debug ("increased decision level to %u", level);
-  assert (control.end < control.end + max_var);
-  *control.end++ = trail.end;
-}
-
-static int *peek_control (unsigned new_level) {
-  assert (new_level < level);
-  return PEEK (control, new_level);
-}
-
-static void pop_control (unsigned new_level) {
-  assert (new_level < level);
-  assert (new_level < SIZE (control));
-  level = new_level;
-  control.end = control.begin + new_level;
-  debug ("decreased decision level to %u", level);
-}
-
 /*------------------------------------------------------------------------*/
 
 // We have four contexts in which we assign variables.
@@ -1013,13 +983,13 @@ static void assign_forced (int lit, struct clause *c) {
 }
 
 static void assign_decision (int lit) {
-  push_control ();
   push_trail (lit);
   values[-lit] = -1;
   values[lit] = 1;
   int idx = abs (lit);
   levels[idx] = level;
   statistics.decisions++;
+  level++;
   debug ("assign %s as decision", debug_literal (lit));
 }
 
@@ -1027,10 +997,9 @@ static void assign_decision (int lit) {
 
 // Variables are only unassigned during backtracking.
 
-static void backtrack (unsigned new_level) {
-  assert (new_level < level);
-  debug ("backtracking to decision level %u", new_level);
-  int *new_trail_end = peek_control (new_level);
+static void backtrack (void) {
+  debug ("backtracking to root decision level");
+  int *new_trail_end = trail.units;
   int *p = trail.end;
   while (p != new_trail_end) {
     int lit = *--p;
@@ -1040,16 +1009,29 @@ static void backtrack (unsigned new_level) {
 #ifndef NDEBUG
     int idx = abs (lit);
     unsigned lit_level = levels[idx];
-    assert (new_level < lit_level);
     unsigned saved_level = level;
     level = lit_level;
     debug ("unassign %s", debug_literal (lit));
     level = saved_level;
 #endif
   }
-  pop_control (new_level);
+  level = 0;
   pop_trail (new_trail_end);
 }
+
+/*------------------------------------------------------------------------*/
+
+#ifndef NDEBUG
+
+// This function used in assertion checking determines whether the literal
+// is valid in principle and fits the allocated size but does not require
+// that its variable has been imported before.
+
+bool valid_literal (int lit) {
+  return lit && lit != INT_MIN && abs (lit) <= max_var;
+}
+
+#endif
 
 /*------------------------------------------------------------------------*/
 
@@ -1059,11 +1041,13 @@ static void backtrack (unsigned new_level) {
 
 static void mark_literal (int lit) {
   // debug ("marking %s", debug_literal (lit));
+  assert (valid_literal (lit));
   marks[lit] = true;
 }
 
 static void unmark_literal (int lit) {
   // debug ("unmarking %s", debug_literal (lit));
+  assert (valid_literal (lit));
   marks[lit] = false;
 }
 
@@ -1086,11 +1070,13 @@ static void unmark_query (void) { unmark_literals (&query); }
 static bool subset_literals (struct ints *a, struct ints *b) {
   mark_literals (b);
   bool res = true;
-  for (all_elements (int, lit, *a))
+  for (all_elements (int, lit, *a)) {
+    assert (valid_literal (lit));
     if (!marks[lit]) {
       res = false;
       break;
     }
+  }
   unmark_literals (b);
   return res;
 }
@@ -1104,10 +1090,14 @@ static bool match_literals (struct ints *a, struct ints *b) {
 // Clause allocation and deallocation.
 
 static bool line_is_tautological () {
-  bool res = true;
+  bool res = false;
   for (all_elements (int, lit, line)) {
-    res |= marks[-lit];
-    marks[lit] = true;
+    assert (valid_literal (lit));
+    if (!marks[lit]) {
+      if (marks[-lit])
+	res = true;
+      marks[lit] = true;
+    }
   }
   unmark_line ();
   return res;
@@ -1147,9 +1137,7 @@ static void free_clause (struct clause *c) {
 
 /*------------------------------------------------------------------------*/
 
-// Watching is complex as we want ILB style clause addition when checking
-// and adding lemmas under assumptions.  Otherwise assumptions have to be be
-// repropagated with every learned clause.
+// Watching and connecting literals is implementing here.
 
 static void watch_literal (int lit, struct clause *c) {
   debug_clause (c, "watching %s in", debug_literal (lit));
@@ -1248,7 +1236,7 @@ static void add_clause (bool input) {
   else if (unit) {
     if (level) {
       debug_clause (c, "added root-level unit");
-      backtrack (0);
+      backtrack ();
     }
     assign_root_level_unit (unit);
   } else if (!falsified)
@@ -1340,7 +1328,7 @@ static bool propagate (void) {
 static void reset_checker (void) {
   if (!inconsistent && level) {
     debug ("resetting assignment");
-    backtrack (0);
+    backtrack ();
   } else
     debug ("no need to reset assignment");
 }
@@ -1356,11 +1344,12 @@ static void save_query (void) {
 /*------------------------------------------------------------------------*/
 
 // This is the essential checking function which checks that added lemmas
-// are indeed reverse unit propagation (RUP) implied and unsatisfiable cores
-// are indeed unsatisfiable.  The first case requires the literals in the
-// current line to be assumed negatively while the second case requires them
-// to be assigned positively, as determined by the last 'sign' argument.
-// The other arguments are for context sensitive logging and error messages.
+// are indeed reverse unit propagation (RUP) implied and unsatisfiable
+// cores are indeed unsatisfiable.  The first case requires the literals
+// in the current line to be assumed negatively while the second case
+// requires them to be assigned positively, as determined by the last
+// 'sign' argument. The other arguments are for context sensitive logging
+// and error messages.
 
 static void check_implied (int type, const char *type_str, int sign) {
 
@@ -1382,8 +1371,8 @@ static void check_implied (int type, const char *type_str, int sign) {
     return;
   }
 
-  // After all root-level units have been propagated assume all literals in
-  // the line as decision if 'sign=1' or their negation if 'sign=-1'.
+  // After all root-level units have been propagated assume all literals
+  // in the line as decision if 'sign=1' or their negation if 'sign=-1'.
 
   debug ("checking %s line is implied", type_str);
   for (all_elements (int, lit, line)) {
@@ -1406,7 +1395,7 @@ static void check_implied (int type, const char *type_str, int sign) {
 IMPLICATION_CHECK_SUCCEEDED:
 
   if (level)
-    backtrack (0);
+    backtrack ();
 
   debug ("%s implication check succeeded", type_str);
   (void) type_str;
@@ -1414,10 +1403,11 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 /*------------------------------------------------------------------------*/
 
-// Clauses are found by marking the literals in the line and then traversing
-// the watches of them to find all clause of the same size with all literals
-// marked and active (not weakened).  It might be possible to speed up this
-// part with hash table, which on the other hand would require more space.
+// Clauses are found by marking the literals in the line and then
+// traversing the watches of them to find all clause of the same size with
+// all literals marked and active (not weakened).  It might be possible to
+// speed up this part with hash table, which on the other hand would
+// require more space.
 
 static struct clause *find_empty_clause (bool weakened) {
   assert (EMPTY (line));
@@ -1558,8 +1548,9 @@ static void restore_clause (struct clause *c) {
 
 static void check_line_consistency (int type) {
   for (all_elements (int, lit, line)) {
+    assert (valid_literal (lit));
     if (marks[-lit])
-      check_error ("inconsistent '%d' line with both %d and %d", type, -lit,
+      check_error ("inconsistent '%c' line with both %d and %d", type, -lit,
                    lit);
     marks[lit] = true;
   }
@@ -1574,6 +1565,7 @@ static void check_line_consistency (int type) {
 static void check_line_consistent_with_saved (int type) {
   mark_line ();
   for (all_elements (int, lit, saved)) {
+    assert (valid_literal (lit));
     if (marks[-lit])
       check_error ("inconsistent '%d' line on %d with line %zu in '%s'",
                    type, lit, start_of_saved, other_file->name);
@@ -1585,9 +1577,11 @@ static void check_line_consistent_with_saved (int type) {
 static void check_satisfied_clause (int type, struct clause *c) {
   if (c->tautological)
     return;
-  for (all_literals (lit, c))
+  for (all_literals (lit, c)) {
+    assert (valid_literal (lit));
     if (marks[lit])
       return;
+  }
   fflush (stdout);
   fprintf (stderr,
            "idrup-check: error: model at line %zu in '%s' "
@@ -1762,6 +1756,7 @@ static void check_line_satisfies_query (int type) {
 static void conclude_satisfiable_query_with_model (int type) {
   debug ("concluding satisfiable query");
   assert (!inconsistent);
+  import_literals ();
   check_line_consistency (type);
   check_line_satisfies_query (type);
   check_line_satisfies_input_clauses (type);
@@ -1858,7 +1853,18 @@ static void debug_state (const char *name) {
   NAME:               /* This is the actual state label. */ \
   debug_state (#NAME) /* And print entering state during logging */
 
+// The checker state machine implemented here should match the graphs in
+// the dot files and the corresponding pdf files, which come in three
+// variants: 'strict' (the default), 'pedantic' and 'relaxed'.  Currently
+// not all features of 'strict' are implemented yet (we still require as
+// in 'pedantic' mode that the interaction file is required to conclude
+// with 'm', 'v', 'u' or 'f' after an 's' status line but the headers can
+// be dropped). Nor are any of the 'relaxed' features working.  The next
+// two comment paragraphs are therefore only here for future reference.
+
 static int parse_and_check (void) {
+
+  // TODO Redundant at this point (see above).
 
   // By default any parse error or failed check will abort the program
   // with exit code '1' except in 'relaxed' parsing mode where parsing and
@@ -1866,6 +1872,8 @@ static int parse_and_check (void) {
   // a 's SATISFIABLE' status line. Without having such a model the
   // checker can not guarantee the input clauses to be satisfied at this
   // point.
+
+  // TODO Redundant at this point (see above).
 
   // For missing 'u' proof conclusion lines the checker might end up in
   // a similar situation (in case the user claims an unsatisfiable core
@@ -1938,6 +1946,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i') {
+      import_literals ();
       match_saved (type, "input");
       goto INTERACTION_INPUT;
     } else if (type == 'p') {
@@ -1959,6 +1968,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'q') {
+      import_literals ();
       match_saved (type, "query");
       goto PROOF_CHECK;
     } else if (type == 'p') {
@@ -2044,10 +2054,12 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'v') {
+      import_literals ();
       check_line_consistency (type);
       save_line (type);
       goto PROOF_MODEL;
     } else if (type == 'm') {
+      import_literals ();
       check_line_consistency (type);
       check_line_satisfies_query (type);
       check_line_satisfies_input_clauses (type);
@@ -2063,6 +2075,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'm') {
+      import_literals ();
       conclude_satisfiable_query_with_model (type);
       goto INTERACTION_INPUT;
     } else {
@@ -2075,16 +2088,18 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'f') {
+      import_literals ();
       check_line_consistency (type);
       check_line_variables_subset_of_query (type);
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {
+      import_literals ();
       check_line_propagation_yields_conflict (type);
       save_line (type);
       goto PROOF_CORE;
     } else {
-      unexpected_line (type, "'f' | 'u'");
+      unexpected_line (type, "'f' or 'u'");
       goto UNREACHABLE;
     }
   }
@@ -2093,6 +2108,7 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'u') {
+      import_literals ();
       conclude_unsatisfiable_query_with_core (type);
       goto INTERACTION_INPUT;
     } else {
@@ -2172,7 +2188,6 @@ static void release (void) {
   release_empty_clauses ();
   release_input_clauses ();
   free (trail.begin);
-  free (control.begin);
   matrix -= allocated;
   free (matrix);
   inactive -= allocated;

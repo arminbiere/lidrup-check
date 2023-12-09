@@ -3,6 +3,9 @@ TODO
 
 - binary proof format
 - linear proofs (LRUP) with chains
+- having a terminating '.' line?
+- printing hashes from 'icnf' file?
+- how to communicate back checked queries?
 - produce occasionally empty clauses in fuzzer
 - blocking literal or at least binary only clauses
 - add tests for full coverage of error messages
@@ -12,3 +15,9 @@ TODO
 - sorting lines (Use radix sort? Separate 'sorted' line?)
 - separate unit clause hash table for precise semantics
 - completely reset trail after removing unit clause
+- add 'idrup-play' to 'execute interaction file and produce proof
+- add mode which only takes the proof file and checks it
+- add a mode which only takes the proof file and checks it
+- add mode to check DIMACS files with DRUP/LRAT
+- implement backward checking from current query
+- consider to use ILB for checking

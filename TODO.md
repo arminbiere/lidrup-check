@@ -1,6 +1,9 @@
 TODO
 ----
 
+- move import to scanner
+- binary proof format
+- linear proofs (LRUP) with chains
 - produce occasionally empty clauses in fuzzer
 - blocking literal or at least binary only clauses
 - add tests for full coverage of error messages

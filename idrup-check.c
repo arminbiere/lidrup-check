@@ -1089,7 +1089,7 @@ static bool line_is_tautological () {
     assert (valid_literal (lit));
     if (!marks[lit]) {
       if (marks[-lit])
-	res = true;
+        res = true;
       marks[lit] = true;
     }
   }

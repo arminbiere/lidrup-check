@@ -592,6 +592,125 @@ static double percent (double a, double b) { return average (100 * a, b); }
 
 /*------------------------------------------------------------------------*/
 
+// Increasing allocated size of variables and importing a variable.
+
+static void increase_allocated (int idx) {
+  assert ((unsigned) idx >= allocated);
+  size_t new_allocated = allocated ? 2 * allocated : 1;
+  while ((unsigned) idx >= new_allocated)
+    new_allocated *= 2;
+  debug ("reallocating from %zu to %zu variables", allocated,
+         new_allocated);
+  {
+    struct clauses *new_matrix =
+        calloc (2 * new_allocated, sizeof *new_matrix);
+    if (!new_matrix)
+      out_of_memory ("reallocating matrix of size %zu", new_allocated);
+    new_matrix += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_matrix[lit] = matrix[lit];
+    matrix -= allocated;
+    free (matrix);
+    matrix = new_matrix;
+  }
+  {
+    struct clauses *new_inactive =
+        calloc (2 * new_allocated, sizeof *new_inactive);
+    if (!new_inactive)
+      out_of_memory ("reallocating inactive matrix of size %zu",
+                     new_allocated);
+    new_inactive += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_inactive[lit] = inactive[lit];
+    inactive -= allocated;
+    free (inactive);
+    inactive = new_inactive;
+  }
+  {
+    signed char *new_values =
+        calloc (2 * new_allocated, sizeof *new_values);
+    if (!new_values)
+      out_of_memory ("reallocating values of size %zu", new_allocated);
+    new_values += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_values[lit] = values[lit];
+    values -= allocated;
+    free (values);
+    values = new_values;
+  }
+  {
+    bool *new_marks = calloc (2 * new_allocated, sizeof *new_marks);
+    if (!new_marks)
+      out_of_memory ("reallocating marks of size %zu", new_allocated);
+    new_marks += new_allocated;
+    if (max_var)
+      for (int lit = -max_var; lit <= max_var; lit++)
+        new_marks[lit] = marks[lit];
+    marks -= allocated;
+    free (marks);
+    marks = new_marks;
+  }
+  {
+    unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
+    if (!new_levels)
+      out_of_memory ("reallocating levels of size %zu", new_allocated);
+    for (int idx = 1; idx <= max_var; idx++)
+      new_levels[idx] = levels[idx];
+    free (levels);
+    levels = new_levels;
+  }
+  {
+    bool *new_imported = calloc (new_allocated, sizeof *new_imported);
+    if (!new_imported)
+      out_of_memory ("reallocating imported of size %zu", new_allocated);
+    for (int idx = 1; idx <= max_var; idx++)
+      new_imported[idx] = imported[idx];
+    free (imported);
+    imported = new_imported;
+  }
+  {
+    size_t size = SIZE (trail);
+    size_t units = trail.units - trail.begin;
+    size_t propagated = trail.propagate - trail.begin;
+    trail.begin =
+        realloc (trail.begin, new_allocated * sizeof *trail.begin);
+    if (!trail.begin)
+      out_of_memory ("reallocating trail of size %zu", new_allocated);
+    trail.end = trail.begin + size;
+    trail.units = trail.begin + units;
+    trail.propagate = trail.begin + propagated;
+    allocated = new_allocated;
+  }
+}
+
+static void increase_max_var (int idx) {
+  assert (max_var < idx);
+  debug ("new maximum variable index %d", idx);
+  if ((unsigned) idx >= allocated)
+    increase_allocated (idx);
+  max_var = idx;
+}
+
+static void import_variable (int idx) {
+  assert (idx);
+  if (max_var < idx) {
+    if (idx == INT_MAX)
+      parse_error ("can not handle INT_MAX variables");
+    if (idx > max_var)
+      increase_max_var (idx);
+  }
+  if (!imported[idx]) {
+    imported[idx] = true;
+    statistics.imported++;
+    debug ("imported variable %d", idx);
+  }
+}
+
+/*------------------------------------------------------------------------*/
+
 // Section on low-level line reading and partial parsing.
 
 static inline void set_file (struct file *new_file) {
@@ -770,6 +889,8 @@ static int next_line_without_printing (char default_type) {
         parse_error ("index too large");
       idx += digit;
     }
+    if (idx)
+      import_variable (idx);
     assert (idx != INT_MIN);
     int lit = sign * idx;
     if (ch != ' ' && ch != '\n')
@@ -800,133 +921,6 @@ static void unexpected_line (int type, const char *expected) {
     parse_error ("unexpected '%c' line (expected %s line)", type, expected);
   else
     parse_error ("unexpected end-of-file (expected %s line)", expected);
-}
-
-/*------------------------------------------------------------------------*/
-
-// Increasing allocated size of variables and importing a variable.
-
-static void increase_allocated (int idx) {
-  assert ((unsigned) idx >= allocated);
-  size_t new_allocated = allocated ? 2 * allocated : 1;
-  while ((unsigned) idx >= new_allocated)
-    new_allocated *= 2;
-  debug ("reallocating from %zu to %zu variables", allocated,
-         new_allocated);
-  {
-    struct clauses *new_matrix =
-        calloc (2 * new_allocated, sizeof *new_matrix);
-    if (!new_matrix)
-      out_of_memory ("reallocating matrix of size %zu", new_allocated);
-    new_matrix += new_allocated;
-    if (max_var)
-      for (int lit = -max_var; lit <= max_var; lit++)
-        new_matrix[lit] = matrix[lit];
-    matrix -= allocated;
-    free (matrix);
-    matrix = new_matrix;
-  }
-  {
-    struct clauses *new_inactive =
-        calloc (2 * new_allocated, sizeof *new_inactive);
-    if (!new_inactive)
-      out_of_memory ("reallocating inactive matrix of size %zu",
-                     new_allocated);
-    new_inactive += new_allocated;
-    if (max_var)
-      for (int lit = -max_var; lit <= max_var; lit++)
-        new_inactive[lit] = inactive[lit];
-    inactive -= allocated;
-    free (inactive);
-    inactive = new_inactive;
-  }
-  {
-    signed char *new_values =
-        calloc (2 * new_allocated, sizeof *new_values);
-    if (!new_values)
-      out_of_memory ("reallocating values of size %zu", new_allocated);
-    new_values += new_allocated;
-    if (max_var)
-      for (int lit = -max_var; lit <= max_var; lit++)
-        new_values[lit] = values[lit];
-    values -= allocated;
-    free (values);
-    values = new_values;
-  }
-  {
-    bool *new_marks = calloc (2 * new_allocated, sizeof *new_marks);
-    if (!new_marks)
-      out_of_memory ("reallocating marks of size %zu", new_allocated);
-    new_marks += new_allocated;
-    if (max_var)
-      for (int lit = -max_var; lit <= max_var; lit++)
-        new_marks[lit] = marks[lit];
-    marks -= allocated;
-    free (marks);
-    marks = new_marks;
-  }
-  {
-    unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
-    if (!new_levels)
-      out_of_memory ("reallocating levels of size %zu", new_allocated);
-    for (int idx = 1; idx <= max_var; idx++)
-      new_levels[idx] = levels[idx];
-    free (levels);
-    levels = new_levels;
-  }
-  {
-    bool *new_imported = calloc (new_allocated, sizeof *new_imported);
-    if (!new_imported)
-      out_of_memory ("reallocating imported of size %zu", new_allocated);
-    for (int idx = 1; idx <= max_var; idx++)
-      new_imported[idx] = imported[idx];
-    free (imported);
-    imported = new_imported;
-  }
-  {
-    size_t size = SIZE (trail);
-    size_t units = trail.units - trail.begin;
-    size_t propagated = trail.propagate - trail.begin;
-    trail.begin =
-        realloc (trail.begin, new_allocated * sizeof *trail.begin);
-    if (!trail.begin)
-      out_of_memory ("reallocating trail of size %zu", new_allocated);
-    trail.end = trail.begin + size;
-    trail.units = trail.begin + units;
-    trail.propagate = trail.begin + propagated;
-    allocated = new_allocated;
-  }
-}
-
-static void increase_max_var (int idx) {
-  assert (max_var < idx);
-  debug ("new maximum variable index %d", idx);
-  if ((unsigned) idx >= allocated)
-    increase_allocated (idx);
-  max_var = idx;
-}
-
-static void import_literal (int lit) {
-  assert (lit);
-  assert (lit != INT_MIN);
-  int idx = abs (lit);
-  if (max_var < idx) {
-    if (idx == INT_MAX)
-      parse_error ("can not handle INT_MAX variables");
-    if (idx > max_var)
-      increase_max_var (idx);
-  }
-  if (!imported[idx]) {
-    imported[idx] = true;
-    statistics.imported++;
-    debug ("imported variable %d", idx);
-  }
-}
-
-static void import_literals (void) {
-  debug ("importing literals");
-  for (all_elements (int, lit, line))
-    import_literal (lit);
 }
 
 /*------------------------------------------------------------------------*/
@@ -1655,21 +1649,19 @@ static void conclude_query (int res) {
 
 // Merged checking options for each line.
 
-static void import_and_add_input_clause (int type) {
-  import_literals ();
+static void add_input_clause (int type) {
   add_clause (true);
   statistics.inputs++;
   (void) type;
 }
 
-static void import_check_then_add_lemma (int type) {
-  import_literals ();
+static void check_then_add_lemma (int type) {
   check_implied (type, "lemma", -1);
   add_clause (false);
   statistics.lemmas++;
 }
 
-static void imported_find_then_delete_clause (int type) {
+static void find_then_delete_clause (int type) {
   check_literals_imported (type);
   struct clause *c = find_active_clause ();
   if (c)
@@ -1678,7 +1670,7 @@ static void imported_find_then_delete_clause (int type) {
     line_error (type, "could not find clause");
 }
 
-static void imported_find_then_restore_clause (int type) {
+static void find_then_restore_clause (int type) {
   check_literals_imported (type);
   struct clause *c = find_weakened_clause ();
   if (c)
@@ -1687,7 +1679,7 @@ static void imported_find_then_restore_clause (int type) {
     line_error (type, "could not find and restore weakened clause");
 }
 
-static void imported_find_then_weaken_clause (int type) {
+static void find_then_weaken_clause (int type) {
   check_literals_imported (type);
   struct clause *c = find_active_clause ();
   if (c)
@@ -1702,14 +1694,14 @@ static bool is_learn_delete_restore_or_weaken (int type) {
 
 static void learn_delete_restore_or_weaken (int type) {
   if (type == 'l')
-    import_check_then_add_lemma (type);
+    check_then_add_lemma (type);
   else if (type == 'd')
-    imported_find_then_delete_clause (type);
+    find_then_delete_clause (type);
   else if (type == 'r')
-    imported_find_then_restore_clause (type);
+    find_then_restore_clause (type);
   else {
     assert (type == 'w');
-    imported_find_then_weaken_clause (type);
+    find_then_weaken_clause (type);
   }
 }
 
@@ -1756,7 +1748,6 @@ static void check_line_satisfies_query (int type) {
 static void conclude_satisfiable_query_with_model (int type) {
   debug ("concluding satisfiable query");
   assert (!inconsistent);
-  import_literals ();
   check_line_consistency (type);
   check_line_satisfies_query (type);
   check_line_satisfies_input_clauses (type);
@@ -1920,11 +1911,10 @@ static int parse_and_check (void) {
     int type = next_line ('i');
     if (type == 'i') {
       save_line (type);
-      import_and_add_input_clause (type);
+      add_input_clause (type);
       goto PROOF_INPUT;
     } else if (type == 'q') {
       start_query ();
-      import_literals ();
       save_line (type);
       save_query ();
       goto PROOF_QUERY;
@@ -1946,7 +1936,6 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line ('i');
     if (type == 'i') {
-      import_literals ();
       match_saved (type, "input");
       goto INTERACTION_INPUT;
     } else if (type == 'p') {
@@ -1968,7 +1957,6 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'q') {
-      import_literals ();
       match_saved (type, "query");
       goto PROOF_CHECK;
     } else if (type == 'p') {
@@ -2054,12 +2042,10 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'v') {
-      import_literals ();
       check_line_consistency (type);
       save_line (type);
       goto PROOF_MODEL;
     } else if (type == 'm') {
-      import_literals ();
       check_line_consistency (type);
       check_line_satisfies_query (type);
       check_line_satisfies_input_clauses (type);
@@ -2075,7 +2061,6 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'm') {
-      import_literals ();
       conclude_satisfiable_query_with_model (type);
       goto INTERACTION_INPUT;
     } else {
@@ -2088,13 +2073,11 @@ static int parse_and_check (void) {
     set_file (interactions);
     int type = next_line (0);
     if (type == 'f') {
-      import_literals ();
       check_line_consistency (type);
       check_line_variables_subset_of_query (type);
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {
-      import_literals ();
       check_line_propagation_yields_conflict (type);
       save_line (type);
       goto PROOF_CORE;
@@ -2108,7 +2091,6 @@ static int parse_and_check (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'u') {
-      import_literals ();
       conclude_unsatisfiable_query_with_core (type);
       goto INTERACTION_INPUT;
     } else {

@@ -21,3 +21,4 @@ TODO
 - add mode to check DIMACS files with DRUP/LRAT
 - implement backward checking from current query
 - consider to use ILB for checking
+- generalize the two bit counter

@@ -60,6 +60,8 @@ run 0 dp4
 run 0 regr1
 run 0 regr2
 
+run 0 cnt2re
+
 run 1 litnotincore
 
 echo "all $passed tests passed"

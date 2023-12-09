@@ -3,11 +3,9 @@
 	g++ -o $@ $< -I../../cadical/src ../../cadical/build/libcadical.a -lm
 SRC=$(wildcard *.cpp)
 PRG=$(SRC:.cpp=.exe)
-tmp: cnt2re.exe
-	./cnt2re.exe
 all: $(PRG)
 	for i in $(PRG); do ./$$i; done
 	./run.sh
 clean:
-	rm -f *.log *.err $(PRG)
+	rm -f *.log *.err *.exe
 .PHONY: all clean

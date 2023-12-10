@@ -729,7 +729,7 @@ static int read_char (void) {
     if (file->end_of_file)
       return EOF;
     file->end_buffer =
-        fread (file->buffer, 1, sizeof file->buffer, file->file);
+       read (fileno (file->file), file->buffer, sizeof file->buffer);
     if (!file->end_buffer) {
       file->end_of_file = 1;
       return EOF;

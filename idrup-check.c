@@ -1945,7 +1945,7 @@ static int parse_and_check (void) {
         goto PROOF_INPUT_UNEXPECTED_LINE;
     } else if (!is_learn_delete_restore_or_weaken (type)) {
     PROOF_INPUT_UNEXPECTED_LINE:
-      unexpected_line (type, "'i', 'l', 'd', 'r' or 'w'");
+      unexpected_line (type, "'i', 'l', 'd', 'w' or 'r'");
       goto UNREACHABLE;
     } else {
       learn_delete_restore_or_weaken (type);
@@ -1966,7 +1966,7 @@ static int parse_and_check (void) {
         goto PROOF_QUERY_UNEXPECTED_LINE;
     } else if (!is_learn_delete_restore_or_weaken (type)) {
     PROOF_QUERY_UNEXPECTED_LINE:
-      unexpected_line (type, "'q', 'l', 'd', 'r' or 'w'");
+      unexpected_line (type, "'q', 'l', 'd', 'w' or 'r'");
       goto UNREACHABLE;
     } else {
       learn_delete_restore_or_weaken (type);
@@ -1981,7 +1981,7 @@ static int parse_and_check (void) {
       learn_delete_restore_or_weaken (type);
       goto PROOF_CHECK;
     } else if (type != 's') {
-      unexpected_line (type, "'s', 'l', 'd', 'r' or 'w'");
+      unexpected_line (type, "'s', 'l', 'd', 'w' or 'r'");
       goto UNREACHABLE;
     } else if (string == SATISFIABLE)
       goto INTERACTION_SATISFIABLE;
@@ -2100,7 +2100,7 @@ static int parse_and_check (void) {
   }
   {
     STATE (END_OF_CHECKING);
-    verbose ("succesfully reached end-of-checking");
+    verbose ("successfully reached end-of-checking");
     return res;
   }
   {

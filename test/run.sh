@@ -54,6 +54,7 @@ run 0 tieandshirt
 run 0 inputlearn1
 run 0 example1
 run 0 example2
+run 0 example3
 run 0 dp2
 run 0 dp3
 run 0 dp4

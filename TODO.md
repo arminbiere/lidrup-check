@@ -1,6 +1,8 @@
 TODO
 ----
 
+- complete strict mode
+- error messages for headers at wrong places
 - binary proof format
 - linear proofs (LRUP) with chains
 - having a terminating '.' line?

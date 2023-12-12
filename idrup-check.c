@@ -729,7 +729,7 @@ static int read_char (void) {
     if (file->end_of_file)
       return EOF;
     file->end_buffer =
-       read (fileno (file->file), file->buffer, sizeof file->buffer);
+        read (fileno (file->file), file->buffer, sizeof file->buffer);
     if (!file->end_buffer) {
       file->end_of_file = 1;
       return EOF;
@@ -1724,6 +1724,7 @@ static void save_line (int type) {
 static bool match_header (const char *expected) {
   if (file->lines > 1)
     return false;
+  assert (!file->type);
   assert (file->lines == 1);
   if (string != expected)
     parse_error ("expected '%s' header and not 'p %s' "
@@ -1817,6 +1818,16 @@ static void conclude_unsatisfiable_query_with_core (int type) {
 
 /*------------------------------------------------------------------------*/
 
+static const char *mode_string (void) {
+  if (mode == strict)
+    return "strict";
+  if (mode == relaxed)
+    return "relaxed";
+  if (mode == pedantic)
+    return "pedantic";
+  return "unknown";
+}
+
 // The main parsing and checking routine can be found below.  It is a
 // simple state-machine implemented with GOTO style programming and uses
 // the following function to show state changes during logging.
@@ -1874,7 +1885,8 @@ static int parse_and_check (void) {
 
   int res = 0; // The exit code of the program without error.
 
-  verbose ("starting interactions and proof checking in strict mode");
+  message ("starting interactions and proof checking in %s mode",
+           mode_string ());
   goto INTERACTION_HEADER; // Explicitly start with this state.
 
   {

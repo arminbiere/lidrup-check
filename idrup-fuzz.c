@@ -229,8 +229,7 @@ static FILE *write_to_file (const char *path) {
 
 static void pick_literals (uint64_t *rng, int *lits, unsigned size) {
   for (unsigned j = 0; j != size; j++) {
-  RESTART:
-    ;
+  RESTART:;
     int idx = pick (rng, 1, vars);
     for (unsigned l = 0; l != j; l++)
       if (abs (lits[l]) == idx)
@@ -330,13 +329,36 @@ static void fuzz (uint64_t seed) {
         if (!quiet)
           fputc ('s', stdout), fflush (stdout);
         fputs ("s SATISFIABLE\n", icnf), fflush (icnf);
-        fputc ('v', icnf);
-        unsigned values = pick (&rng, 0, vars);
-        for (unsigned i = 0; i != values; i++) {
-          int lit = pick (&rng, 1, vars);
-          int val = ccadical_val (solver, lit);
-          fprintf (icnf, " %d", val == lit ? lit : -lit);
-          concluded = true;
+        if (pick (&rng, 0, 1)) {
+          fputc ('v', icnf);
+          unsigned values = pick (&rng, 0, vars);
+          for (unsigned i = 0; i != values; i++) {
+            int lit = pick (&rng, 1, vars);
+            int val = ccadical_val (solver, lit);
+            fprintf (icnf, " %d", val == lit ? lit : -lit);
+            concluded = true;
+          }
+        } else {
+          fputc ('m', icnf);
+          int scrambled[vars];
+          for (int i = 0; i != vars; i++) {
+	    int idx = i + 1;
+            if (i) {
+	      int pos = pick (&rng, 0, i + 1);
+	      if (pos < i) {
+		int tmp = scrambled[pos];
+		scrambled[pos] = idx;
+		idx = tmp;
+	      }
+            }
+	    scrambled[i] = idx;
+          }
+          for (int i = 0; i != vars; i++) {
+	    int lit = scrambled[i];
+            int val = ccadical_val (solver, lit);
+            fprintf (icnf, " %d", val == lit ? lit : -lit);
+            concluded = true;
+          }
         }
       } else {
         if (!quiet)

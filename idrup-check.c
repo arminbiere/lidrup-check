@@ -1881,7 +1881,7 @@ static int parse_and_check (void) {
     STATE (INTERACTION_HEADER);
     if (mode == pedantic) {
       set_file (interactions);
-      int type = next_line ('p');
+      int type = next_line (0);
       if (type == 'p' && match_header (ICNF))
         goto PROOF_HEADER;
       else {
@@ -1895,7 +1895,7 @@ static int parse_and_check (void) {
     STATE (PROOF_HEADER);
     if (mode == pedantic) {
       set_file (proof);
-      int type = next_line ('p');
+      int type = next_line (0);
       if (type == 'p' && match_header (IDRUP))
         goto INTERACTION_INPUT;
       else {

@@ -388,11 +388,20 @@ static void message (const char *fmt, ...) {
   fflush (stdout);
 }
 
-#define verbose(...) \
-  do { \
-    if (verbosity >= 1) \
-      message (__VA_ARGS__); \
-  } while (0)
+static void verbose (const char *, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
+static void verbose (const char *fmt, ...) {
+  if (verbosity < 1)
+    return;
+  fputs ("c ", stdout);
+  va_list ap;
+  va_start (ap, fmt);
+  vprintf (fmt, ap);
+  va_end (ap);
+  fputc ('\n', stdout);
+  fflush (stdout);
+}
 
 static void parse_error (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
@@ -1725,7 +1734,6 @@ static void save_line (int type) {
 static bool match_header (const char *expected) {
   if (file->lines > 1)
     return false;
-  assert (!file->type);
   assert (file->lines == 1);
   if (string != expected)
     parse_error ("expected '%s' header and not 'p %s' "
@@ -2139,13 +2147,22 @@ static int parse_and_check (void) {
 
 /*------------------------------------------------------------------------*/
 
-// Clean-up functions.
+// Memory leaks could be a show-stopper for large proofs.  To find memory
+// leaks reclaiming all memory before successfully exiting the checker is
+// thus not only good style.  Reclaiming memory combined with memory
+// checkers, e.g., 'configure -a' to compile with ASAN, allows to check for
+// memory leaks.   It is however non-trivial to enforce though as we can
+// only find all the clauses through their watches, move clauses between the
+// two-watched active clause set and the one-watched passive clause set, in
+// combination with never deleting input clauses, having only one watch for
+// unit clauses anyhow and finally also gracefully handle tautological
+// clauses (which might have the same watched literal twice).
 
 // Without a global list of clauses we traverse watch lists during
 // deallocation of clauses and only deallocate a clauses if we visit it
 // the second time through its larger watch.
 
-static void release_watches (void) {
+static void release_active (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
@@ -2156,8 +2173,10 @@ static void release_watches (void) {
       else {
         int *lits = c->lits;
         int other = lits[0] ^ lits[1] ^ lit;
-        if (other < lit)
-          free_clause (c);
+        if (other == lit)
+          lits[0] = INT_MIN; // Care for tautological clauses.
+        else if (other < lit)
+          free_clause (c); // Second visit of clause.
       }
     }
     RELEASE (*watches);
@@ -2191,7 +2210,7 @@ static void release (void) {
   RELEASE (saved);
   RELEASE (query);
   if (max_var) {
-    release_watches ();
+    release_active ();
     release_inactive ();
   }
   release_empty_clauses ();

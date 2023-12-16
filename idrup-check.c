@@ -87,10 +87,10 @@ struct file {
   size_t lineno;         // Line number of lines parsed so far.
   size_t charno;         // Number of bytes parsed.
   size_t start_of_line;  // Line number of current proof line.
+  bool end_of_file;      // Buffer 'read-char' detected end-of-file.
+  char last_char;        // Saved last char for bumping 'lineno'.
   size_t end_buffer;     // End of remaining characters in buffer.
   size_t size_buffer;    // Current position (bytes parsed) in buffer.
-  bool end_of_file;      // Buffer 'read-char' detected end-of-file.
-  char last_char;        // Last char used to bump 'lineno'.
   char buffer[1u << 20]; // The actual buffer (1MB).
 };
 
@@ -99,11 +99,11 @@ struct clause {
   size_t id;
   size_t lineno;
 #endif
-  bool input;
-  bool weakened;
-  bool tautological;
-  unsigned size;
-  int lits[];
+  bool input;        // Input clauses are never freed.
+  bool weakened;     // Weakened clause are inactive (and one-watched).
+  bool tautological; // Tautological clauses are always satisfied.
+  unsigned size;     // The actual allocated size of 'lits'.
+  int lits[];        // Flexible array member: lits[0], ..., lits[size-1].
 };
 
 struct clauses {
@@ -112,11 +112,10 @@ struct clauses {
 
 /*------------------------------------------------------------------------*/
 
-// Global options.
+// Global command line run-time options.
 
-static int verbosity = 0;
-
-static int mode = strict;
+static int verbosity;     // -1=quiet, 0=default, 1=verbose, INT_MAX=logging
+static int mode = strict; // Default 'strict not 'relaxed' nor 'pedantic'.
 
 /*------------------------------------------------------------------------*/
 
@@ -148,16 +147,19 @@ static double start_time;
 /*------------------------------------------------------------------------*/
 
 static struct ints line;  // Current line of integers parsed.
-static struct ints saved; // Saved line for checking.
+static struct ints saved; // Saved line for matching lines.
 static struct ints query; // Saved query for checking.
 
-// When saving a line the type and start of the line is saved too.
+// When saving a line the type and start of the line is saved too, where
+// with start-of-the-line we mean the line number in the file.
 
 static size_t start_of_query;
 static size_t start_of_saved;
 static int saved_type;
 
-// Constant strings parsed in 'p' and 's' lines.
+// Constant strings parsed in 'p' and 's' lines.  By only using global
+// constant strings we can compare expected and scanned strings by simple
+// pointer comparison, e.g., 'string == SATISFIABLE', instead of 'strcmp'.
 
 static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
@@ -173,9 +175,9 @@ static const char *string;
 
 // Checker state.
 
-static unsigned level;           // Decision level.
 static int max_var;              // Maximum variable index imported.
-static size_t allocated;         // Allocated variables.
+static size_t allocated;         // Allocated variables (>= 'max_var').
+static unsigned level;           // Decision level (number assumptions).
 static bool *imported;           // Variable index imported?
 static unsigned *levels;         // Decision level of assigned variables.
 static struct clauses *matrix;   // Mapping literals to watcher stacks.
@@ -1618,7 +1620,12 @@ static void check_line_propagation_yields_conflict (int type) {
   debug ("unsatisfiable core implied");
 }
 
-// Check that the given literal has been imported before.
+/*------------------------------------------------------------------------*/
+
+// Check that the given literal has been imported before.  This in a certain
+// sense is redundant for checking correctness but gives more useful error
+// messages and should be really cheap anyhow since it does not require even
+// marking literals.  Imported statistics are probably useful too.
 
 static void check_literal_imported (int type, int lit) {
   int idx = abs (lit);
@@ -2149,28 +2156,32 @@ static int parse_and_check (void) {
 
 // Memory leaks could be a show-stopper for large proofs.  To find memory
 // leaks reclaiming all memory before successfully exiting the checker is
-// thus not only good style.  Reclaiming memory combined with memory
+// thus not only good style.  Reclaiming all memory combined with memory
 // checkers, e.g., 'configure -a' to compile with ASAN, allows to check for
-// memory leaks.   It is however non-trivial to enforce though as we can
-// only find all the clauses through their watches, move clauses between the
-// two-watched active clause set and the one-watched passive clause set, in
-// combination with never deleting input clauses, having only one watch for
-// unit clauses anyhow and finally also gracefully handle tautological
+// memory leaks.  It is however non-trivial to enforce though as we can
+// only find all the clauses through their watches, do move clauses between
+// the two-watched active clause set and the one-watched passive clause set,
+// in combination with never deleting input clauses, having only one watch
+// for unit clauses anyhow and finally also gracefully handle tautological
 // clauses (which might have the same watched literal twice).
 
 // Without a global list of clauses we traverse watch lists during
 // deallocation of clauses and only deallocate a clauses if we visit it
 // the second time through its larger watch.
 
-static void release_active (void) {
+static void release_active_clauses (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
+    if (!lit)
+      continue;
     struct clauses *watches = matrix + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->input)
         continue; // Released separately.
-      if (c->size < 2)
+      if (c->size < 2) {
+        assert (c->size == 1);
         free_clause (c);
-      else {
+      } else {
+        assert (c->size >= 2);
         int *lits = c->lits;
         int other = lits[0] ^ lits[1] ^ lit;
         if (other == lit)
@@ -2183,8 +2194,10 @@ static void release_active (void) {
   }
 }
 
-static void release_inactive (void) {
+static void release_inactive_clauses (void) {
   for (int lit = -max_var; lit <= max_var; lit++) {
+    if (!lit)
+      continue;
     struct clauses *watches = inactive + lit;
     for (all_pointers (struct clause, c, *watches))
       if (!c->input)
@@ -2209,10 +2222,8 @@ static void release (void) {
   RELEASE (line);
   RELEASE (saved);
   RELEASE (query);
-  if (max_var) {
-    release_active ();
-    release_inactive ();
-  }
+  release_active_clauses ();
+  release_inactive_clauses ();
   release_empty_clauses ();
   release_input_clauses ();
   free (trail.begin);

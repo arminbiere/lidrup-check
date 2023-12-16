@@ -1791,7 +1791,7 @@ static void check_saved_failed_literals_match_core (int type) {
     if (marks[-lit])
       check_error (
           "literal '%d' in this unsatisfiable core 'u' line of the proof "
-          "is also claimed not to be a failed literal "
+          "is claimed not to be a failed literal "
           "in the 'f' line %zu of the interaction file '%s' "
           "(as it occurs negated as '%d' there)",
           -lit, start_of_saved, interactions->name, lit);

@@ -1747,20 +1747,6 @@ static void check_line_satisfies_query (int type) {
   debug ("line literals satisfy query");
 }
 
-static void conclude_satisfiable_query_with_model (int type) {
-  debug ("concluding satisfiable query");
-  assert (!inconsistent);
-  check_line_consistency (type);
-  check_line_satisfies_query (type);
-  check_line_satisfies_input_clauses (type);
-  check_line_consistent_with_saved (type);
-  statistics.conclusions++;
-  statistics.models++;
-  assert (!level);
-  debug ("satisfiable query concluded");
-  conclude_query (10);
-}
-
 static void check_core_subset_of_query (int type) {
   mark_query ();
   for (all_elements (int, lit, line))
@@ -1797,6 +1783,27 @@ static void check_saved_failed_literals_match_core (int type) {
   for (all_elements (int, lit, line))
     marks[lit] = false;
   (void) type;
+}
+
+/*------------------------------------------------------------------------*/
+
+// The two conclusion functions here make sure that the last query was
+// checked correctly and can be discharged and depending on whether the
+// solvers answer was that the query was satisfiable or unsatisfiable either
+// require a model line or an unsatisfiable core, which are checked.
+
+static void conclude_satisfiable_query_with_model (int type) {
+  debug ("concluding satisfiable query");
+  assert (!inconsistent);
+  check_line_consistency (type);
+  check_line_satisfies_query (type);
+  check_line_satisfies_input_clauses (type);
+  check_line_consistent_with_saved (type);
+  statistics.conclusions++;
+  statistics.models++;
+  assert (!level);
+  debug ("satisfiable query concluded");
+  conclude_query (10);
 }
 
 static void conclude_unsatisfiable_query_with_core (int type) {
@@ -1857,7 +1864,7 @@ static void debug_state (const char *name) {
   debug_state (#NAME) /* And print entering state during logging */
 
 // The checker state machine implemented here should match the graphs in
-// the dot files and the corresponding pdf files, which come in three
+// the dot files and the corresponding PDF files.  They come in three
 // variants: 'strict' (the default), 'pedantic' and 'relaxed'.  Currently
 // not all features of 'strict' are implemented yet (we still require as
 // in 'pedantic' mode that the interaction file is required to conclude
@@ -1886,9 +1893,16 @@ static int parse_and_check (void) {
 
   int res = 0; // The exit code of the program without error.
 
-  message ("starting interactions and proof checking in %s mode",
-           mode_string ());
+  message ("proof checking in %s mode", mode_string ());
   goto INTERACTION_HEADER; // Explicitly start with this state.
+
+  // In order to build a clean state-machine the basic block of each state
+  // should always be left with a 'goto'.  To ease code reviewing we even
+  // want to enforce this rule for unreachable code after error message
+  // (which abort the program) by adding a 'goto UNREACHABLE' after those
+  // error messages and further have a 'goto UNREACHABLE' implicitly before
+  // each 'state' label.  The 'UNREACHABLE' state should not be reachable
+  // and if in a corner cases it still is prints a fatal error message.
 
   {
     STATE (INTERACTION_HEADER);

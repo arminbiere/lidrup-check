@@ -319,7 +319,7 @@ static size_t next_debug_buffer_position;
 
 /*------------------------------------------------------------------------*/
 
-// Iterator for the literals of clauses.
+// Iterator for the literals of a clause.
 
 #define begin_literals(C) ((C)->lits)
 
@@ -2250,7 +2250,7 @@ static void print_statistics (void) {
   printf ("c %-20s %20.2f seconds %4.0f %% wall-clock\n",
           "process-time:", p, percent (p, w));
   printf ("c %-20s %20.2f seconds  100 %%\n", "wall-clock-time:", w);
-  printf ("c %-20s %11.2f MB\n", "bymaximum-resident-set-size:", m);
+  printf ("c %-20s %11.2f MB\n", "maximum-resident-set-size:", m);
   fflush (stdout);
 }
 

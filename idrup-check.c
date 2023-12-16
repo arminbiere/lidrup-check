@@ -173,11 +173,9 @@ static const char *string;
 
 // Checker state.
 
-static unsigned level; // Decision level.
-
-static int max_var;      // Maximum variable index imported.
-static size_t allocated; // Allocated variables.
-
+static unsigned level;           // Decision level.
+static int max_var;              // Maximum variable index imported.
+static size_t allocated;         // Allocated variables.
 static bool *imported;           // Variable index imported?
 static unsigned *levels;         // Decision level of assigned variables.
 static struct clauses *matrix;   // Mapping literals to watcher stacks.
@@ -185,7 +183,10 @@ static struct clauses *inactive; // Inactive weakened clauses.
 static signed char *values;      // Assignment of literal: -1, 0, or 1.
 static bool *marks;              // Marks of literals.
 
-// Default preallocated trail.
+// This is the default preallocated trail. It is only resized during
+// importing a new variable and thus allows simpler 'push' operations,
+// without the need to check for the need for resizing when traversing
+// either, which gives an nicer code when propagating literals.
 
 static struct {
   int *begin, *end;

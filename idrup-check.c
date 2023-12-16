@@ -1790,10 +1790,11 @@ static void check_saved_failed_literals_match_core (int type) {
   for (all_elements (int, lit, saved))
     if (marks[-lit])
       check_error (
-          "literal %d claimed not to be a failed literal "
-          "(as it occurs negatively as %d in the 'f' line %zu in '%s') "
-          "is in this unsatisfiable core 'u' line of the proof",
-          -lit, lit, start_of_saved, interactions->name);
+          "literal '%d' in this unsatisfiable core 'u' line of the proof "
+          "is also claimed not to be a failed literal "
+          "in the 'f' line %zu of the interaction file '%s' "
+          "(as it occurs negated as '%d' there)",
+          -lit, start_of_saved, interactions->name, lit);
   unmark_line ();
   for (all_elements (int, lit, line))
     marks[lit] = false;

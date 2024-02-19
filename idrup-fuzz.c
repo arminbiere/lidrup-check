@@ -390,9 +390,15 @@ static void fuzz (uint64_t seed) {
 #define ERR PATH ".err"
 #define LOG PATH ".log"
 #define REDIRECT " 1>" LOG " 2>" ERR
-#define CMD "./idrup-check -v " ICNF " " IDRUP
+#define CMD1 "./idrup-check -v " IDRUP
+#define CMD2 "./idrup-check -v " ICNF " " IDRUP
 
-  int res = system (CMD REDIRECT);
+  const char * cmd;
+  if (pick (&rng, 0, 1))
+    cmd = CMD2 REDIRECT;
+  else
+    cmd = CMD1 REDIRECT;
+  int res = system (cmd);
   if (res) {
     if (quiet)
       printf ("%020" PRIu64 " %" PRIu64 " %u %u %u FAILED\n", seed, fuzzed,
@@ -403,7 +409,7 @@ static void fuzz (uint64_t seed) {
     }
     if (!keep_going) {
       fflush (stdout);
-      fputs (CMD, stdout);
+      fputs (cmd, stdout);
       fputc ('\n', stdout);
       fflush (stdout);
       {

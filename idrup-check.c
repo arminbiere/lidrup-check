@@ -2238,6 +2238,7 @@ static int parse_and_check_idrup (void) {
       goto PROOF_CORE;
     else {
       assert (string == UNKNOWN);
+      conclude_query (0);
       goto PROOF_INPUT;
     }
   }

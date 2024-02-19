@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * idrup_check_usage =
-"usage: idrup-check [ <option> ... ] <icnf> <idrup>\n"
+"usage: idrup-check [ <option> ... ] [ <icnf> ] <idrup>\n"
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
@@ -14,7 +14,7 @@ static const char * idrup_check_usage =
 "  --version       print version and exit\n"
 "\n"
 
-"Exactly two files are read. The first '<icnf>' is an incremental CNF file\n"
+"If two files are specified the first '<icnf>' is an incremental CNF file\n"
 "augmented with all interactions between the user and the SAT solver.\n"
 "Thus the letter 'i' is overloaded and means both 'incremental' and\n"
 "'interactions'. The second '<idrup>' file is meant to be a super-set of\n"
@@ -22,25 +22,34 @@ static const char * idrup_check_usage =
 
 "\n"
 
-"The checker makes sure the interactions match the proof and all proof\n"
-"steps are justified. This is only the case though for the default\n"
-"'strict' and the 'pedantic' mode.  Checking is less strict in 'relaxed'\n"
-"mode where conclusion missing in the proof will be skipped.  Still the\n"
-"exit code will only be zero if all checks go through and thus the\n"
-"interactions are all checked.\n"
+"The checker then makes sure the interactions match the proof and\n"
+"all proof steps are justified. This is only the case though for the\n"
+"default 'strict' and the 'pedantic' mode.  Checking is less strict in\n"
+"'relaxed' mode where conclusion missing in the proof will be skipped.\n"
+"Still the exit code will only be zero if all checks go through and thus\n"
+"the interactions are all checked.\n"
 
 "\n"
 "These modes can can be set explicitly as follows:\n"
 "\n"
+
 "  --strict    strict mode (requires 'm' and 'u' proof lines only)\n"
 "  --relaxed   relaxed mode (missing 'm' and 'u' proof lines ignored)\n"
 "  --pedantic  pedantic mode (requires conclusion lines in both files\n"
+
 "\n"
 
 "The default mode is strict checking which still allows headers to be\n"
 "skipped and interaction conclusions ('v', 'm', 'f' and 'u' lines) to be\n"
 "optional in the interaction file while corresponding proof conclusions\n"
 "('m' and 'u' lines) being mandatory in the proof file.\n"
+
+"\n"
+
+"If only the '<idrup>' file is specified then it is supposed to contain\n"
+"only the interaction proof lines.  In this case the query and the input\n"
+"lines are assumed to match those of the user and are thus not checked\n"
+"but the rest of the checking works exactly in the same way.\n"
 
 ;
 

@@ -21,6 +21,7 @@ digraph "idrup-check" {
   PROOF_CHECK -> PROOF_CHECK [label=" l | d | r | w ",dir=back,fontsize=20];
   PROOF_CHECK -> INTERACTION_SATISFIABLE [label=" s SATISFIABLE "];
   PROOF_CHECK -> INTERACTION_UNSATISFIABLE [label=" s UNSATISFIABLE "];
+  PROOF_CHECK -> INTERACTION_UNKNOWN [label=" s UNKNNOWN "];
 
   INTERACTION_UNSATISFIABLE [shape="box",label="INTERACTION_UNSATISFIABLE?"];
   INTERACTION_UNSATISFIABLE -> INTERACTION_UNSATISFIED [label=" s UNSATISFIABLE "];
@@ -39,6 +40,9 @@ digraph "idrup-check" {
   INTERACTION_UNSATISFIED -> PROOF_INPUT_OR_CORE [label=" i ",color=invis,fontcolor=invis];
   INTERACTION_UNSATISFIED -> PROOF_QUERY_OR_CORE [label=" q ",color=invis,fontsize=20,fontcolor=invis];
   INTERACTION_UNSATISFIED -> PROOF_CORE_AND_END [label=" $ ",color=invis,fontcolor=invis];
+
+  INTERACTION_UNKNOWN [shape=box];
+  INTERACTION_UNKNOWN -> INTERACTION_INPUT [label="s UNKNOWN",weight=2];
 
   PROOF_MODEL_AND_END [color=invis,fontcolor=invis]
   PROOF_MODEL_AND_END -> "end-of-checking" [label=" m ",color=invis,fontsize=20,fontcolor=invis];

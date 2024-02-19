@@ -132,12 +132,13 @@ static int mode = strict; // Default 'strict not 'relaxed' nor 'pedantic'.
 
 // Array of two files statically allocated and initialized.
 
+static int num_files;
 static struct file files[2] = {{.lineno = 1}, {.lineno = 1}};
 
 // The actual interaction and proof files point into this array.
 
-static struct file *interactions = files + 0;
-static struct file *proof = files + 1;
+static struct file *interactions;
+static struct file *proof;
 
 // The current file from which we read (is set with 'set_file').
 
@@ -1823,7 +1824,8 @@ static void conclude_satisfiable_query_with_model (int type) {
   check_line_consistency (type);
   check_line_satisfies_query (type);
   check_line_satisfies_input_clauses (type);
-  check_line_consistent_with_saved (type);
+  if (num_files > 1)
+    check_line_consistent_with_saved (type);
   statistics.conclusions++;
   statistics.models++;
   assert (!level);
@@ -1835,11 +1837,13 @@ static void conclude_unsatisfiable_query_with_core (int type) {
   debug ("concluding satisfiable query");
   check_line_propagation_yields_conflict (type);
   check_core_subset_of_query (type);
-  if (saved_type == 'u')
-    match_saved (type, "unsatisfiable core");
-  else {
-    assert (saved_type == 'f');
-    check_saved_failed_literals_match_core (type);
+  if (num_files > 1) {
+    if (saved_type == 'u')
+      match_saved (type, "unsatisfiable core");
+    else {
+      assert (saved_type == 'f');
+      check_saved_failed_literals_match_core (type);
+    }
   }
   statistics.conclusions++;
   statistics.cores++;
@@ -1897,7 +1901,7 @@ static void debug_state (const char *name) {
 // be dropped). Nor are any of the 'relaxed' features working.  The next
 // two comment paragraphs are therefore only here for future reference.
 
-static int parse_and_check (void) {
+static int parse_and_check_icnf_and_idrup (void) {
 
   // TODO Redundant at this point (see above).
 
@@ -1918,7 +1922,7 @@ static int parse_and_check (void) {
 
   int res = 0; // The exit code of the program without error.
 
-  message ("proof checking in %s mode", mode_string ());
+  message ("interaction and proof checking in %s mode", mode_string ());
   goto INTERACTION_HEADER; // Explicitly start with this state.
 
   // In order to build a clean state-machine the basic block of each state
@@ -2164,6 +2168,112 @@ static int parse_and_check (void) {
 
 /*------------------------------------------------------------------------*/
 
+// This is the version of the parser and checker when only the '<idrup>'
+// file is given. It is much simpler but otherwise works the same way as
+// 'parse_and_check_icnf_and_idrup' which checks the interactions in the
+// '<icnf>' file against the proof lines in '<idrup>'.
+
+static int parse_and_check_idrup (void) {
+
+  int res = 0; // See comments above why we have this redundant 'res'.
+
+  set_file (proof);
+  message ("proof checking in %s mode", mode_string ());
+  goto PROOF_HEADER;
+
+  {
+    STATE (PROOF_HEADER);
+    if (mode == pedantic) {
+      int type = next_line (0);
+      if (type == 'p' && match_header (ICNF))
+        goto PROOF_INPUT;
+      else {
+        unexpected_line (type, "in pedantic mode 'p icnf' header");
+        goto UNREACHABLE;
+      }
+    } else
+      goto PROOF_INPUT;
+  }
+  {
+    STATE (PROOF_INPUT);
+    int type = next_line ('i');
+    if (type == 'i') {
+      add_input_clause (type);
+      goto PROOF_INPUT;
+    } else if (type == 'p') {
+      if (match_header (IDRUP))
+        goto PROOF_INPUT;
+      else
+        goto PROOF_INPUT_UNEXPECTED_LINE;
+    } else if (type == 'q')
+      goto PROOF_CHECK;
+    else if (type == 0)
+      goto END_OF_CHECKING;
+    else if (!is_learn_delete_restore_or_weaken (type)) {
+    PROOF_INPUT_UNEXPECTED_LINE:
+      unexpected_line (type, "'q', 'i', 'l', 'd', 'w' or 'r'");
+      goto UNREACHABLE;
+    } else {
+      learn_delete_restore_or_weaken (type);
+      goto PROOF_INPUT;
+    }
+  }
+  {
+    STATE (PROOF_CHECK);
+    int type = next_line ('l');
+    if (is_learn_delete_restore_or_weaken (type)) {
+      learn_delete_restore_or_weaken (type);
+      goto PROOF_CHECK;
+    } else if (type != 's') {
+      unexpected_line (type, "'s', 'l', 'd', 'w' or 'r'");
+      goto UNREACHABLE;
+    } else if (string == SATISFIABLE)
+      goto PROOF_MODEL;
+    else if (string == UNSATISFIABLE)
+      goto PROOF_CORE;
+    else {
+      assert (string == UNKNOWN);
+      goto PROOF_INPUT;
+    }
+  }
+  {
+    STATE (PROOF_MODEL);
+    set_file (proof);
+    int type = next_line (0);
+    if (type == 'm') {
+      conclude_satisfiable_query_with_model (type);
+      goto PROOF_INPUT;
+    } else {
+      unexpected_line (type, "'m'");
+      goto UNREACHABLE;
+    }
+  }
+  {
+    STATE (PROOF_CORE);
+    set_file (proof);
+    int type = next_line (0);
+    if (type == 'u') {
+      conclude_unsatisfiable_query_with_core (type);
+      goto PROOF_INPUT;
+    } else {
+      unexpected_line (type, "'u'");
+      goto UNREACHABLE;
+    }
+  }
+  {
+    STATE (END_OF_CHECKING);
+    verbose ("successfully reached end-of-checking");
+    return res;
+  }
+  {
+    STATE (UNREACHABLE);
+    fatal_error ("invalid parser state reached");
+    return 1;
+  }
+}
+
+/*------------------------------------------------------------------------*/
+
 // Memory leaks could be a show-stopper for large proofs.  To find memory
 // leaks reclaiming all memory before successfully exiting the checker is
 // thus not only good style.  Reclaiming all memory combined with memory
@@ -2349,7 +2459,9 @@ static void init_signals (void) {
 /*------------------------------------------------------------------------*/
 
 int main (int argc, char **argv) {
+
   start_of_wall_clock_time = absolute_wall_clock_time ();
+
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h") || !strcmp (arg, "--help")) {
@@ -2375,22 +2487,26 @@ int main (int argc, char **argv) {
       mode = pedantic;
     else if (arg[0] == '-')
       die ("invalid command line option '%s' (try '-h')", arg);
-    else if (!files[0].name)
-      files[0].name = arg;
-    else if (!files[1].name)
-      files[1].name = arg;
+    else if (num_files < 2)
+      files[num_files++].name = arg;
     else
       die ("too many files '%s', '%s' and '%s'", files[0].name,
            files[1].name, arg);
   }
-  if (!files[0].name)
+
+  if (!num_files)
     die ("no file given but expected two (try '-h')");
-  if (!files[1].name)
-    die ("one file '%s' given but expected two (try '-h')", files[0].name);
-  if (!(files[0].file = fopen (files[0].name, "r")))
-    die ("can not read incremental CNF file '%s'", files[0].name);
-  if (!(files[1].file = fopen (files[1].name, "r")))
-    die ("can not read incremental DRUP proof file '%s'", files[1].name);
+
+  if (num_files == 2) {
+    interactions = files;
+    proof = interactions + 1;
+    if (!(files[0].file = fopen (files[0].name, "r")))
+      die ("can not read incremental CNF file '%s'", files[0].name);
+  } else
+    proof = files;
+
+  if (!(proof->file = fopen (proof->name, "r")))
+    die ("can not read incremental DRUP proof file '%s'", proof->name);
 
   message ("Interaction DRUP Checker");
   message ("Copyright (c) 2023 Armin Biere University of Freiburg");
@@ -2409,10 +2525,11 @@ int main (int argc, char **argv) {
   message ("reading and checking incremental DRUP proof '%s'",
            files[1].name);
 
-  for (int i = 0; i != 2; i++)
-    files[i].lineno = 1;
-
-  int res = parse_and_check ();
+  int res;
+  if (num_files == 1)
+    res = parse_and_check_idrup ();
+  else
+    res = parse_and_check_icnf_and_idrup ();
 
   if (verbosity >= 0)
     fputs ("c\n", stdout);
@@ -2422,7 +2539,7 @@ int main (int argc, char **argv) {
     fputs ("s VERIFIED\n", stdout);
   fflush (stdout);
 
-  for (int i = 0; i != 2; i++) {
+  for (int i = 0; i != num_files; i++) {
     if (verbosity > 0) {
       if (!i)
         fputs ("c\n", stdout);

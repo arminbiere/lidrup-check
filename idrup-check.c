@@ -739,9 +739,12 @@ static inline void set_file (struct file *new_file) {
   assert (new_file);
   assert (new_file->file);
   file = new_file;
-  other_file = file == interactions ? proof : interactions;
-  assert (other_file);
-  assert (other_file->file);
+  if (num_files == 2) {
+    other_file = file == interactions ? proof : interactions;
+    assert (other_file);
+    assert (other_file->file);
+  } else
+    assert (!other_file);
 }
 
 static int read_char (void) {
@@ -2205,9 +2208,11 @@ static int parse_and_check_idrup (void) {
         goto PROOF_INPUT;
       else
         goto PROOF_INPUT_UNEXPECTED_LINE;
-    } else if (type == 'q')
+    } else if (type == 'q') {
+      start_query ();
+      save_query ();
       goto PROOF_CHECK;
-    else if (type == 0)
+    } else if (type == 0)
       goto END_OF_CHECKING;
     else if (!is_learn_delete_restore_or_weaken (type)) {
     PROOF_INPUT_UNEXPECTED_LINE:
@@ -2241,6 +2246,7 @@ static int parse_and_check_idrup (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'm') {
+      save_line (type);
       conclude_satisfiable_query_with_model (type);
       goto PROOF_INPUT;
     } else {
@@ -2253,6 +2259,7 @@ static int parse_and_check_idrup (void) {
     set_file (proof);
     int type = next_line (0);
     if (type == 'u') {
+      save_line (type);
       conclude_unsatisfiable_query_with_core (type);
       goto PROOF_INPUT;
     } else {
@@ -2521,9 +2528,11 @@ int main (int argc, char **argv) {
 
   if (verbosity >= 0)
     fputs ("c\n", stdout);
-  message ("reading incremental CNF '%s'", files[0].name);
+
+  if (interactions)
+    message ("reading incremental CNF '%s'", interactions->name);
   message ("reading and checking incremental DRUP proof '%s'",
-           files[1].name);
+           proof->name);
 
   int res;
   if (num_files == 1)

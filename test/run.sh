@@ -12,9 +12,13 @@ binary=idrup-check
 
 [ -f ./$binary ] || die "could not find '$binary' binary"
 
+files=1
 passed=0
 
 run () {
+  case $files$2 in
+    1litnotincore) return;;
+  esac
   expected=$1
   shift
   base="$1"
@@ -22,7 +26,12 @@ run () {
   proof=test/$base.idrup
   log=test/$base.log
   err=test/$base.err
-  cmd="./$binary $icnf $proof"
+  if [ $files = 1 ]
+  then
+    cmd="./$binary $proof"
+  else
+    cmd="./$binary $icnf $proof"
+  fi
   printf "%s" "$cmd"
   $cmd 1>$log 2>$err
   actual=$?
@@ -39,6 +48,9 @@ run () {
   fi
   passed=`expr $passed + 1`
 }
+
+while [ $files -le 2 ]
+do
 
 run 0 empty
 run 0 unit0
@@ -65,5 +77,9 @@ run 0 regr2
 run 0 cnt2re
 
 run 1 litnotincore
+
+files="`expr $files + 1`"
+
+done
 
 echo "all $passed tests passed"

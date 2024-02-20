@@ -31,7 +31,7 @@ check=undefined
 
 CC="gcc"
 CFLAGS="-Wall"
-TARGETS="idrup-check"
+TARGETS="lidrup-check"
 
 while [ $# -gt 0 ]
 do
@@ -86,8 +86,8 @@ fi
 
 if [ $fuzzer = yes ]
 then
-  msg "building and linking 'idrup-fuzz' fuzzer"
-  TARGETS="$TARGETS idrup-fuzz"
+  msg "building and linking 'lidrup-fuzz' fuzzer"
+  TARGETS="$TARGETS lidrup-fuzz"
 else
   msg "not building fuzzer (install and compile CaDiCaL in '../cadical/')"
 fi

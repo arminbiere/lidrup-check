@@ -2,17 +2,17 @@ CC=@CC@
 CFLAGS=@CFLAGS@
 COMPILE=$(CC) $(CFLAGS)
 all: @TARGETS@
-idrup-check: idrup-check.o idrup-build.o makefile
-	$(COMPILE) -o $@ idrup-check.o idrup-build.o
-idrup-fuzz: idrup-fuzz.o idrup-build.o makefile ../cadical/build/libcadical.a
-	$(COMPILE) -o $@ idrup-fuzz.o idrup-build.o ../cadical/build/libcadical.a -lstdc++ -lm
-idrup-build.o: idrup-build.c idrup-build.h idrup-config.h makefile
+lidrup-check: lidrup-check.o lidrup-build.o makefile
+	$(COMPILE) -o $@ lidrup-check.o lidrup-build.o
+lidrup-fuzz: lidrup-fuzz.o lidrup-build.o makefile ../cadical/build/libcadical.a
+	$(COMPILE) -o $@ lidrup-fuzz.o lidrup-build.o ../cadical/build/libcadical.a -lstdc++ -lm
+lidrup-build.o: lidrup-build.c lidrup-build.h lidrup-config.h makefile
 	$(CC) $(CFLAGS) -c $<
-idrup-check.o: idrup-check.c idrup-build.h makefile
+lidrup-check.o: lidrup-check.c lidrup-build.h makefile
 	$(COMPILE) -c $<
-idrup-fuzz.o: idrup-fuzz.c idrup-build.h makefile ../cadical/src/ccadical.h
+lidrup-fuzz.o: lidrup-fuzz.c lidrup-build.h makefile ../cadical/src/ccadical.h
 	$(COMPILE) -c -I../cadical/src $<
-idrup-config.h: mkconfig.sh makefile
+lidrup-config.h: mkconfig.sh makefile
 	./mkconfig.sh > $@
 dots=$(wildcard *.dot)
 pdfs:$(dots:.dot=.pdf)
@@ -20,12 +20,12 @@ pdfs:$(dots:.dot=.pdf)
 .dot.pdf:
 	dot -Tpdf $< -o $@
 clean:
-	rm -f makefile idrup-check idrup-fuzz idrup-config.h *.o
+	rm -f makefile lidrup-check lidrup-fuzz lidrup-config.h *.o
 	make -C test clean
 format:
-	clang-format -i idrup-check.c
+	clang-format -i lidrup-check.c
 test: all
 	./test/run.sh
-fuzz: idrup-check idrup-fuzz
-	./idrup-fuzz -1000
+fuzz: lidrup-check lidrup-fuzz
+	./lidrup-fuzz -1000
 .PHONY: all clean format pdf test

@@ -1,6 +1,6 @@
 // clang-format off
 
-static const char * idrup_check_usage =
+static const char * lidrup_check_usage =
 "usage: idrup-check [ <option> ... ] [ <icnf> ] <idrup>\n"
 "\n"
 "where '<option>' is one of the following options:\n"
@@ -2473,7 +2473,7 @@ int main (int argc, char **argv) {
   for (int i = 1; i != argc; i++) {
     const char *arg = argv[i];
     if (!strcmp (arg, "-h") || !strcmp (arg, "--help")) {
-      fputs (idrup_check_usage, stdout);
+      fputs (lidrup_check_usage, stdout);
       exit (0);
     } else if (!strcmp (arg, "-q") || !strcmp (arg, "--quiet"))
       verbosity = -1;
@@ -2486,7 +2486,7 @@ int main (int argc, char **argv) {
       die ("invalid line option '%s' (compiled without debugging)", arg);
 #endif
     else if (!strcmp (arg, "--version"))
-      printf ("%s\n", idrup_version), exit (0);
+      printf ("%s\n", lidrup_version), exit (0);
     else if (!strcmp (arg, "--strict"))
       mode = strict;
     else if (!strcmp (arg, "--relaxed"))
@@ -2518,12 +2518,12 @@ int main (int argc, char **argv) {
 
   message ("Interaction DRUP Checker");
   message ("Copyright (c) 2023 Armin Biere University of Freiburg");
-  if (idrup_gitid)
-    message ("Version %s %s", idrup_version, idrup_gitid);
+  if (lidrup_gitid)
+    message ("Version %s %s", lidrup_version, lidrup_gitid);
   else
-    message ("Version %s", idrup_version);
-  message ("Compiler %s", idrup_compiler);
-  message ("Build %s", idrup_build);
+    message ("Version %s", lidrup_version);
+  message ("Compiler %s", lidrup_compiler);
+  message ("Build %s", lidrup_build);
 
   init_signals ();
 

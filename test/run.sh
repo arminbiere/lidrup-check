@@ -8,7 +8,7 @@ die () {
 cd `dirname $0` || die "could not change to 'test' directory"
 cd .. || die "could not change back to 'test/..'"
 
-binary=idrup-check
+binary=lidrup-check
 
 [ -f ./$binary ] || die "could not find '$binary' binary"
 
@@ -23,7 +23,7 @@ run () {
   shift
   base="$1"
   icnf=test/$base.icnf
-  proof=test/$base.idrup
+  proof=test/$base.lidrup
   log=test/$base.log
   err=test/$base.err
   if [ $files = 1 ]

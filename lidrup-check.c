@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * lidrup_check_usage =
-"usage: idrup-check [ <option> ... ] [ <icnf> ] <idrup>\n"
+"usage: lidrup-check [ <option> ... ] [ <icnf> ] <idrup>\n"
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
@@ -174,7 +174,7 @@ static int saved_type;
 static const char *const SATISFIABLE = "SATISFIABLE";
 static const char *const UNSATISFIABLE = "UNSATISFIABLE";
 static const char *const UNKNOWN = "UNKNOWN";
-static const char *const IDRUP = "idrup";
+static const char *const LIDRUP = "lidrup";
 static const char *const ICNF = "icnf";
 
 // The parser saves such strings here.
@@ -820,24 +820,28 @@ static int next_line_without_printing (char default_type) {
   if (ch == 'p') {
     if (next_char () != ' ')
     INVALID_HEADER_LINE:
-      parse_error ("invalid 'p' header line");
+      parse_error ("invalid 'p ...' header line");
 
-    if (next_char () != 'i')
+    ch = next_char ();
+    if (ch == 'i') {
+      for (const char *p = "cnf"; (ch = *p); p++)
+        if (next_char () != ch)
+          goto INVALID_HEADER_LINE;
+      string = ICNF;
+    } else if (ch == 'l') {
+      for (const char *p = "idrup"; (ch = *p); p++)
+        if (next_char () != ch)
+          goto INVALID_HEADER_LINE;
+      string = LIDRUP;
+    } else
       goto INVALID_HEADER_LINE;
 
     // TODO parse 'p cnf <vars> <clauses>' header too.
 
     ch = next_char ();
-    if (ch == 'c' && next_char () == 'n' && next_char () == 'f')
-      string = ICNF;
-    else if (ch == 'd' && next_char () == 'r' && next_char () == 'u' &&
-             next_char () == 'p')
-      string = IDRUP;
-    else
-      goto INVALID_HEADER_LINE;
 
     if (next_char () != '\n')
-      parse_error ("expected new line after 'p icnf' header");
+      parse_error ("expected new line after '%s' header", string);
 
     return 'p';
   }
@@ -1955,7 +1959,7 @@ static int parse_and_check_icnf_and_idrup (void) {
     if (mode == pedantic) {
       set_file (proof);
       int type = next_line (0);
-      if (type == 'p' && match_header (IDRUP))
+      if (type == 'p' && match_header (LIDRUP))
         goto INTERACTION_INPUT;
       else {
         unexpected_line (type, "in pedantic mode 'p idrup' header");
@@ -1998,7 +2002,7 @@ static int parse_and_check_icnf_and_idrup (void) {
       match_saved (type, "input");
       goto INTERACTION_INPUT;
     } else if (type == 'p') {
-      if (match_header (IDRUP))
+      if (match_header (LIDRUP))
         goto PROOF_INPUT;
       else
         goto PROOF_INPUT_UNEXPECTED_LINE;
@@ -2019,7 +2023,7 @@ static int parse_and_check_icnf_and_idrup (void) {
       match_saved (type, "query");
       goto PROOF_CHECK;
     } else if (type == 'p') {
-      if (match_header (IDRUP))
+      if (match_header (LIDRUP))
         goto PROOF_QUERY;
       else
         goto PROOF_QUERY_UNEXPECTED_LINE;
@@ -2204,7 +2208,7 @@ static int parse_and_check_idrup (void) {
       add_input_clause (type);
       goto PROOF_INPUT;
     } else if (type == 'p') {
-      if (match_header (IDRUP))
+      if (match_header (LIDRUP))
         goto PROOF_INPUT;
       else
         goto PROOF_INPUT_UNEXPECTED_LINE;
@@ -2532,8 +2536,7 @@ int main (int argc, char **argv) {
 
   if (interactions)
     message ("reading incremental CNF '%s'", interactions->name);
-  message ("reading and checking incremental DRUP proof '%s'",
-           proof->name);
+  message ("reading and checking incremental DRUP proof '%s'", proof->name);
 
   int res;
   if (num_files == 1)

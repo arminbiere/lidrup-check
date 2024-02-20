@@ -1,6 +1,6 @@
-# Incremental DRUP Checker
+# Linear Incremental DRUP Checker
 
-This is a proof checker for incremental DRUP.
+This is a proof checker for the linear incremental DRUP proof format.
 
 Run `configure && make test` to configure, compile and test `idrup-check`.
 

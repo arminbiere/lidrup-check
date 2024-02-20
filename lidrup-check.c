@@ -1,7 +1,7 @@
 // clang-format off
 
 static const char * lidrup_check_usage =
-"usage: lidrup-check [ <option> ... ] [ <icnf> ] <idrup>\n"
+"usage: lidrup-check [ <option> ... ] [ <icnf> ] <lidrup>\n"
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
@@ -17,8 +17,9 @@ static const char * lidrup_check_usage =
 "If two files are specified the first '<icnf>' is an incremental CNF file\n"
 "augmented with all interactions between the user and the SAT solver.\n"
 "Thus the letter 'i' is overloaded and means both 'incremental' and\n"
-"'interactions'. The second '<idrup>' file is meant to be a super-set of\n"
-"the interactions file but additionally has all the low level proof steps.\n"
+"'interactions'. The second '<lidrup>' file is meant to be a super-set\n"
+"of the interactions file but additionally has all the low level linear\n"
+"incremental DRUP proof steps.\n"
 
 "\n"
 
@@ -46,7 +47,7 @@ static const char * lidrup_check_usage =
 
 "\n"
 
-"If only the '<idrup>' file is specified then it is supposed to contain\n"
+"If only the '<lidrup>' file is specified then it is supposed to contain\n"
 "only the interaction proof lines.  In this case the query and the input\n"
 "lines are assumed to match those of the user and are thus not checked\n"
 "but the rest of the checking works exactly in the same way.\n"
@@ -350,7 +351,7 @@ static size_t next_debug_buffer_position;
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
 static void die (const char *fmt, ...) {
-  fputs ("idrup-check: error: ", stderr);
+  fputs ("lidrup-check: error: ", stderr);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -363,7 +364,7 @@ static void out_of_memory (const char *, ...)
     __attribute__ ((format (printf, 1, 2)));
 
 static void fatal_error (const char *fmt, ...) {
-  fputs ("idrup-check: fatal internal error: ", stderr);
+  fputs ("lidrup-check: fatal internal error: ", stderr);
   if (file)
     fprintf (stderr, "at line %zu in '%s': ", file->start_of_line,
              file->name);
@@ -376,7 +377,7 @@ static void fatal_error (const char *fmt, ...) {
 }
 
 static void out_of_memory (const char *fmt, ...) {
-  fputs ("idrup-check: error: out-of-memory ", stderr);
+  fputs ("lidrup-check: error: out-of-memory ", stderr);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -420,7 +421,7 @@ static void parse_error (const char *, ...)
 
 static void parse_error (const char *fmt, ...) {
   assert (file);
-  fprintf (stderr, "idrup-check: parse error: at line %zu in '%s': ",
+  fprintf (stderr, "lidrup-check: parse error: at line %zu in '%s': ",
            file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
@@ -436,7 +437,7 @@ static void check_error (const char *, ...)
 static void check_error (const char *fmt, ...) {
   assert (file);
   fprintf (stderr,
-           "idrup-check: error: at line %zu in '%s': ", file->start_of_line,
+           "lidrup-check: error: at line %zu in '%s': ", file->start_of_line,
            file->name);
   va_list ap;
   va_start (ap, fmt);
@@ -453,7 +454,7 @@ static void line_error (int type, const char *fmt, ...) {
   assert (file);
   fflush (stdout);
   fprintf (stderr,
-           "idrup-check: error: at line %zu in '%s': ", file->start_of_line,
+           "lidrup-check: error: at line %zu in '%s': ", file->start_of_line,
            file->name);
   va_list ap;
   va_start (ap, fmt);
@@ -837,8 +838,6 @@ static int next_line_without_printing (char default_type) {
       goto INVALID_HEADER_LINE;
 
     // TODO parse 'p cnf <vars> <clauses>' header too.
-
-    ch = next_char ();
 
     if (next_char () != '\n')
       parse_error ("expected new line after '%s' header", string);
@@ -1607,7 +1606,7 @@ static void check_satisfied_clause (int type, struct clause *c) {
   }
   fflush (stdout);
   fprintf (stderr,
-           "idrup-check: error: model at line %zu in '%s' "
+           "lidrup-check: error: model at line %zu in '%s' "
            "does not satisfy %s clause:\n",
            file->start_of_line, file->name,
            c->input ? "input" : "derived"); // Defensive at this point!!!
@@ -1962,7 +1961,7 @@ static int parse_and_check_icnf_and_idrup (void) {
       if (type == 'p' && match_header (LIDRUP))
         goto INTERACTION_INPUT;
       else {
-        unexpected_line (type, "in pedantic mode 'p idrup' header");
+        unexpected_line (type, "in pedantic mode 'p lidrup' header");
         goto UNREACHABLE;
       }
     } else
@@ -2175,10 +2174,10 @@ static int parse_and_check_icnf_and_idrup (void) {
 
 /*------------------------------------------------------------------------*/
 
-// This is the version of the parser and checker when only the '<idrup>'
+// This is the version of the parser and checker when only the '<lidrup>'
 // file is given. It is much simpler but otherwise works the same way as
 // 'parse_and_check_icnf_and_idrup' which checks the interactions in the
-// '<icnf>' file against the proof lines in '<idrup>'.
+// '<icnf>' file against the proof lines in '<lidrup>'.
 
 static int parse_and_check_idrup (void) {
 

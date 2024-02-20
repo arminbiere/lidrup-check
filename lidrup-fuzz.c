@@ -2,7 +2,7 @@
 
 static const char * usage =
 
-"usage: idrup-fuzz [ <option> ... ] [ <number> [ <number> ] ]\n"
+"usage: lidrup-fuzz [ <option> ... ] [ <number> [ <number> ] ]\n"
 "\n"
 "where '<option>' is one of the following two\n"
 "\n"
@@ -68,7 +68,7 @@ static const char * usage =
 static bool quiet;      // Force not output if enabled.
 static bool small;      // Only use a small set of variables.
 static bool terminal;   // Erase printed lines if connected to a terminal.
-static bool keep_going; // Keep going even if 'idrup-check' failed.
+static bool keep_going; // Keep going even if 'lidrup-check' failed.
 
 static volatile uint64_t repetitions; // Number of repetitions if specified.
 static bool limited = false;          // If repetitions limits this is set.
@@ -132,7 +132,7 @@ static void msg (const char *fmt, ...) {
 static void die (const char *, ...) __attribute__ ((format (printf, 1, 2)));
 
 static void die (const char *fmt, ...) {
-  fputs ("idrup-fuzz: error: ", stderr);
+  fputs ("lidrup-fuzz: error: ", stderr);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -250,15 +250,15 @@ static void fuzz (uint64_t seed) {
   unsigned calls = pick (&rng, 1, small ? 3 : 10);
   if (!quiet)
     printf (" %u %u %u", vars, clauses, calls), fflush (stdout);
-#define PATH "/tmp/idrup-fuzz"
+#define PATH "/tmp/lidrup-fuzz"
 #define ICNF PATH ".icnf"
-#define IDRUP PATH ".idrup"
+#define LIDRUP PATH ".lidrup"
   FILE *icnf = write_to_file (ICNF);
-  FILE *idrup = write_to_file (IDRUP);
+  FILE *lidrup = write_to_file (LIDRUP);
   CCaDiCaL *solver = ccadical_init ();
-  ccadical_set_option (solver, "idrup", 1);
+  ccadical_set_option (solver, "lidrup", 1);
   ccadical_set_option (solver, "binary", 0);
-  ccadical_trace_proof (solver, idrup, IDRUP);
+  ccadical_trace_proof (solver, lidrup, LIDRUP);
   fputs ("p icnf\n", icnf);
   unsigned subset = (clauses + calls - 1) / calls;
   if (!quiet)
@@ -383,15 +383,15 @@ static void fuzz (uint64_t seed) {
   }
   ccadical_release (solver);
   fclose (icnf);
-  fclose (idrup);
+  fclose (lidrup);
   if (!quiet)
     fputs (" ]", stdout), fflush (stdout);
 
 #define ERR PATH ".err"
 #define LOG PATH ".log"
 #define REDIRECT " 1>" LOG " 2>" ERR
-#define CMD1 "./idrup-check -v " IDRUP
-#define CMD2 "./idrup-check -v " ICNF " " IDRUP
+#define CMD1 "./lidrup-check -v " LIDRUP
+#define CMD2 "./lidrup-check -v " ICNF " " LIDRUP
 
   const char * cmd;
   if (pick (&rng, 0, 1))
@@ -477,7 +477,7 @@ int main (int argc, char **argv) {
       }
     }
   }
-  msg ("IDRUP Fuzzer Version 0.0");
+  msg ("LIDRUP Fuzzer Version 0.0");
   msg ("using %s", ccadical_signature ());
   if (seeded)
     msg ("specified seed %" PRIu64, rng);

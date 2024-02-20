@@ -64,6 +64,7 @@ static const char * lidrup_check_usage =
 
 #include <assert.h>
 #include <ctype.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -84,8 +85,22 @@ enum {
 
 // Generic integer stack for literals.
 
-struct ints {
+struct lits {
   int *begin, *end, *allocated;
+};
+
+// Generic integer stack for clause ids.
+
+struct ids {
+  int64_t *begin, *end, *allocated;
+};
+
+// Parsed line.
+
+struct line {
+  int64_t id;
+  struct lits lits;
+  struct ids ids;
 };
 
 // We are reading interleaved from two files in parallel.
@@ -157,7 +172,7 @@ static double start_time;
 
 /*------------------------------------------------------------------------*/
 
-static struct ints line;  // Current line of integers parsed.
+static struct line line;  // Current line of integers parsed.
 static struct ints saved; // Saved line for matching lines.
 static struct ints query; // Saved query for checking.
 
@@ -178,7 +193,7 @@ static const char *const UNKNOWN = "UNKNOWN";
 static const char *const LIDRUP = "lidrup";
 static const char *const ICNF = "icnf";
 
-// The parser saves such strings here.
+// The parser saves strings here.
 
 static const char *string;
 
@@ -436,9 +451,8 @@ static void check_error (const char *, ...)
 
 static void check_error (const char *fmt, ...) {
   assert (file);
-  fprintf (stderr,
-           "lidrup-check: error: at line %zu in '%s': ", file->start_of_line,
-           file->name);
+  fprintf (stderr, "lidrup-check: error: at line %zu in '%s': ",
+           file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -451,20 +465,36 @@ static void line_error (int type, const char *, ...)
     __attribute__ ((format (printf, 2, 3)));
 
 static void line_error (int type, const char *fmt, ...) {
+  assert (type != 's');
+  assert (type != 'p');
   assert (file);
   fflush (stdout);
-  fprintf (stderr,
-           "lidrup-check: error: at line %zu in '%s': ", file->start_of_line,
-           file->name);
+  fprintf (stderr, "lidrup-check: error: at line %zu in '%s': ",
+           file->start_of_line, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
   va_end (ap);
   fputc ('\n', stderr);
   fputc (type, stderr);
-  for (all_elements (int, lit, line))
-    fprintf (stderr, " %d", lit);
-  fputs (" 0\n", stderr);
+  if (type == 'i' || type == 'l' || type == 'w' || type == 'r') {
+    assert (line.id > 0);
+    printf (" %" PRId64, line.id);
+  } else
+    assert (!line.id);
+  if (type == 'i' || type == 'l' || type == 'q' || type == 'm' ||
+      type == 'u') {
+    for (all_elements (int, lit, line.lits))
+      fprintf (stderr, " %d", lit);
+    fputs (" 0\n", stderr);
+  } else
+    assert (EMPTY (line.lits));
+  if (type == 'l' || type == 'u') {
+    for (all_elements (int64_t, id, line.ids))
+      fprintf (stderr, " %" PRId64, id);
+    fputs (" 0\n", stderr);
+  } else
+    assert (EMPTY (line.ids));
   exit (1);
 }
 
@@ -812,10 +842,13 @@ static int next_line_without_printing (char default_type) {
       break;
   }
 
+  int parsed_type = 0;
   int actual_type = 0;
   string = 0;
 
-  CLEAR (line);
+  line.id = 0;
+  CLEAR (line.lits);
+  CLEAR (line.ids);
   file->lines++;
 
   if (ch == 'p') {
@@ -846,7 +879,7 @@ static int next_line_without_printing (char default_type) {
   }
 
   if ('a' <= ch && ch <= 'z') {
-    actual_type = ch;
+    parsed_type = actual_type = ch;
     if ((ch = next_char ()) != ' ')
       parse_error ("expected space after '%c'", actual_type);
     ch = next_char ();
@@ -857,6 +890,7 @@ static int next_line_without_printing (char default_type) {
       parse_error ("unexpected character code %02x", (int) ch);
   } else
     actual_type = default_type;
+
   if (actual_type == 's') {
     if (ch == 'S') {
       for (const char *p = "ATISFIABLE"; *p; p++)
@@ -891,49 +925,84 @@ static int next_line_without_printing (char default_type) {
       goto INVALID_STATUS_LINE;
     return 's';
   }
-  for (;;) {
-    int sign;
-    if (ch == '-') {
-      ch = next_char ();
-      if (ch == '0')
-        parse_error ("expected non-zero digit after '-'");
-      if (!ISDIGIT (ch))
-        parse_error ("expected digit after '-'");
-      sign = -1;
-    } else {
-      if (!ISDIGIT (ch))
-        parse_error ("expected digit or '-'");
-      sign = 1;
-    }
-    int idx = ch - '0';
-    while (ISDIGIT (ch = next_char ())) {
-      if (!idx)
-        parse_error ("invalid leading '0' digit");
-      if (INT_MAX / 10 < idx)
-        parse_error ("index too large");
-      idx *= 10;
-      int digit = ch - '0';
-      if (INT_MAX - digit < idx)
-        parse_error ("index too large");
-      idx += digit;
-    }
-    if (idx)
-      import_variable (idx);
-    assert (idx != INT_MIN);
-    int lit = sign * idx;
-    if (ch != ' ' && ch != '\n')
-      parse_error ("expected space or new-line after '%d'", lit);
-    if (ch == '\n') { // TODO what about continued lines (e.g., 'v' lines)?
-      if (lit)
-        parse_error ("expected zero literal '0' before new-line");
-      return actual_type;
-    }
-    if (!lit)
-      parse_error ("zero literal '0' without new-line");
-    PUSH (line, lit);
-    assert (ch == ' ');
+
+  if (parsed_type && (ch != ' ')
+    parse_error ("expected space after '%c'", parsed_type);
+
+  if (actual_type == 'i' || actual_type == 'l') {
     ch = next_char ();
+    if (!ISDIGIT (ch))
+      parse_error ("expected clause identifier");
+    int64_t id = ch - '0';
+    while (ISDIGIT (ch = next_char ())) {
+      if (!id)
+        parse_error ("invalid leading '0' digit");
+      if (INT64_MAX / 10 < id)
+        parser ("clause identifier to large");
+      id *= 10;
+      int digit = ch - '0';
+      if (INT64_MAX - digit < id)
+        parser ("clause identifier to large");
+      id += digit;
+    }
+    if (ch != ' ')
+      parse_error ("expected space after '%" PRId64 "'", id);
+    line.id = id;
   }
+
+  if (actual_type == 'i' || actual_type == 'l' || actual_type == 'q' ||
+      actual_type == 'm' || actual_type == 'u') {
+    for (;;) {
+      int sign;
+      if (ch == '-') {
+        ch = next_char ();
+        if (ch == '0')
+          parse_error ("expected non-zero digit after '-'");
+        if (!ISDIGIT (ch))
+          parse_error ("expected digit after '-'");
+        sign = -1;
+      } else {
+        if (!ISDIGIT (ch))
+          parse_error ("expected digit or '-'");
+        sign = 1;
+      }
+      int idx = ch - '0';
+      while (ISDIGIT (ch = next_char ())) {
+        if (!idx)
+          parse_error ("invalid leading '0' digit");
+        if (INT_MAX / 10 < idx)
+          parse_error ("variable index too large");
+        idx *= 10;
+        int digit = ch - '0';
+        if (INT_MAX - digit < idx)
+          parse_error ("variable index too large");
+        idx += digit;
+      }
+      if (idx)
+        import_variable (idx);
+      assert (idx != INT_MIN);
+      int lit = sign * idx;
+      if (actual_type == 'q' || actual_type == 'm') {
+        if (!lit && ch != '\n')
+          parse_error ("expected new-line after '0'");
+        if (lit && ch != ' ')
+          parse_error ("expected space after '%d'", lit);
+        assert (ch == ' ' || ch == '\n');
+        if (!lit)
+          return actual_type;
+      } else {
+        if (ch != ' ')
+          parse_error ("expected space after '%d'", lit);
+        if (!lit)
+          break;
+      }
+      PUSH (line, lit);
+      assert (ch == ' ');
+      ch = next_char ();
+    }
+  }
+
+  if (acutl
 }
 
 static inline int next_line (char default_type) {
@@ -1638,10 +1707,11 @@ static void check_line_propagation_yields_conflict (int type) {
 
 /*------------------------------------------------------------------------*/
 
-// Check that the given literal has been imported before.  This in a certain
-// sense is redundant for checking correctness but gives more useful error
-// messages and should be really cheap anyhow since it does not require even
-// marking literals.  Imported statistics are probably useful too.
+// Check that the given literal has been imported before.  This in a
+// certain sense is redundant for checking correctness but gives more
+// useful error messages and should be really cheap anyhow since it does
+// not require even marking literals.  Imported statistics are probably
+// useful too.
 
 static void check_literal_imported (int type, int lit) {
   int idx = abs (lit);
@@ -1821,8 +1891,9 @@ static void check_saved_failed_literals_match_core (int type) {
 
 // The two conclusion functions here make sure that the last query was
 // checked correctly and can be discharged and depending on whether the
-// solvers answer was that the query was satisfiable or unsatisfiable either
-// require a model line or an unsatisfiable core, which are checked.
+// solvers answer was that the query was satisfiable or unsatisfiable
+// either require a model line or an unsatisfiable core, which are
+// checked.
 
 static void conclude_satisfiable_query_with_model (int type) {
   debug ("concluding satisfiable query");
@@ -1935,9 +2006,10 @@ static int parse_and_check_icnf_and_idrup (void) {
   // should always be left with a 'goto'.  To ease code reviewing we even
   // want to enforce this rule for unreachable code after error message
   // (which abort the program) by adding a 'goto UNREACHABLE' after those
-  // error messages and further have a 'goto UNREACHABLE' implicitly before
-  // each 'state' label.  The 'UNREACHABLE' state should not be reachable
-  // and if in a corner cases it still is prints a fatal error message.
+  // error messages and further have a 'goto UNREACHABLE' implicitly
+  // before each 'state' label.  The 'UNREACHABLE' state should not be
+  // reachable and if in a corner cases it still is prints a fatal error
+  // message.
 
   {
     STATE (INTERACTION_HEADER);
@@ -2288,13 +2360,14 @@ static int parse_and_check_idrup (void) {
 // Memory leaks could be a show-stopper for large proofs.  To find memory
 // leaks reclaiming all memory before successfully exiting the checker is
 // thus not only good style.  Reclaiming all memory combined with memory
-// checkers, e.g., 'configure -a' to compile with ASAN, allows to check for
-// memory leaks.  It is however non-trivial to enforce though as we can
-// only find all the clauses through their watches, do move clauses between
-// the two-watched active clause set and the one-watched passive clause set,
-// in combination with never deleting input clauses, having only one watch
-// for unit clauses anyhow and finally also gracefully handle tautological
-// clauses (which might have the same watched literal twice).
+// checkers, e.g., 'configure -a' to compile with ASAN, allows to check
+// for memory leaks.  It is however non-trivial to enforce though as we
+// can only find all the clauses through their watches, do move clauses
+// between the two-watched active clause set and the one-watched passive
+// clause set, in combination with never deleting input clauses, having
+// only one watch for unit clauses anyhow and finally also gracefully
+// handle tautological clauses (which might have the same watched literal
+// twice).
 
 // Without a global list of clauses we traverse watch lists during
 // deallocation of clauses and only deallocate a clauses if we visit it

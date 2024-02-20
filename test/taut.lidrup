@@ -1,5 +1,5 @@
 c testing some basic tautological clause handling
-p idrup
+p lidrup
 3 1 4 1 1 -1 2 0
 q 0
 l 3 3 4 -4 -2 0

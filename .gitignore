@@ -1,5 +1,5 @@
 makefile
-idrup-config.h
-idrup-check
-idrup-fuzz
+lidrup-config.h
+lidrup-check
+lidrup-fuzz
 *.o

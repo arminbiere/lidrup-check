@@ -16,9 +16,8 @@ TODO
 - sorting lines (Use radix sort? Separate 'sorted' line?)
 - separate unit clause hash table for precise semantics
 - completely reset trail after removing unit clause
-- add 'idrup-play' to 'execute interaction file and produce proof
+- add 'idrup-play' to 'execute' interaction file and produce proof
 - add mode which only takes the proof file and checks it
-- add a mode which only takes the proof file and checks it
 - add mode to check DIMACS files with DRUP/LRAT
 - implement backward checking from current query
 - consider to use ILB for checking

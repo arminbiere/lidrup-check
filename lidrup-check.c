@@ -949,7 +949,7 @@ static int next_line_without_printing (char default_type) {
     return 's';
   }
 
-  if (type_has_id (actual_type)) {
+  if (file != interactions && type_has_id (actual_type)) {
 
     assert (!line.id);
 
@@ -1023,7 +1023,7 @@ static int next_line_without_printing (char default_type) {
       assert (idx != INT_MIN);
       int lit = sign * idx;
 
-      if (type_has_ids (actual_type)) {
+      if (file != interactions && type_has_ids (actual_type)) {
         if (ch != ' ')
           parse_error ("expected space after '%d'", lit);
         if (!lit) {
@@ -1046,6 +1046,7 @@ static int next_line_without_printing (char default_type) {
     }
   }
 
+  assert (file != interactions);
   assert (type_has_ids (actual_type));
   assert (EMPTY (line.ids));
 
@@ -2236,7 +2237,6 @@ static int parse_and_check_icnf_and_idrup (void) {
     int type = next_line ('i');
     if (type == 'i') {
       save_line (type);
-      add_input_clause (type);
       goto PROOF_INPUT;
     } else if (type == 'q') {
       start_query ();
@@ -2262,6 +2262,7 @@ static int parse_and_check_icnf_and_idrup (void) {
     int type = next_line ('i');
     if (type == 'i') {
       match_saved (type, "input");
+      add_input_clause (type);
       goto INTERACTION_INPUT;
     } else if (type == 'p') {
       if (match_header (LIDRUP))

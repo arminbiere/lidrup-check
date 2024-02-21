@@ -2768,6 +2768,11 @@ int main (int argc, char **argv) {
   if (verbosity >= 0)
     fputs ("c\n", stdout);
 
+  if (no_reuse)
+    message ("checking that all clause identifiers are distincts");
+  else
+    message ("allowing to reuse deleted clause identifiers");
+
   if (interactions)
     message ("reading incremental CNF '%s'", interactions->name);
   message ("reading and checking incremental DRUP proof '%s'", proof->name);

@@ -4,7 +4,7 @@ p lidrup
 a 0
 l 2 3 3 4 -4 -2 0 0
 w 1 0
-l 3 2 2 2 1 -2 0
+l 3 2 2 2 1 -2 0 0
 r 1 0
 s SATISFIABLE
 m 0

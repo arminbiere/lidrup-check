@@ -468,11 +468,11 @@ static void check_error (const char *fmt, ...) {
 static bool type_has_id (int t) { return t == 'i' || t == 'l'; }
 
 static bool type_has_lits (int t) {
-  return t == 'i' || t == 'l' || t == 'q' || t == 'm' || t == 'q';
+  return t == 'i' || t == 'l' || t == 'q' || t == 'm' || t == 'u';
 }
 
 static bool type_has_ids (int t) {
-  return t == 'l' || t == 'd' || t == 'w' || t == 'r';
+  return t == 'l' || t == 'd' || t == 'w' || t == 'r' || t == 'u';
 }
 
 static void line_error (int type, const char *, ...)
@@ -1010,7 +1010,14 @@ static int next_line_without_printing (char default_type) {
       assert (idx != INT_MIN);
       int lit = sign * idx;
 
-      if (actual_type == 'i' || actual_type == 'q' || actual_type == 'm') {
+      if (type_has_ids (actual_type)) {
+        if (ch != ' ')
+          parse_error ("expected space after '%d'", lit);
+        if (!lit) {
+          ch = next_char ();
+          break;
+        }
+      } else {
         if (!lit && ch != '\n')
           parse_error ("expected new-line after '0'");
         if (lit && ch != ' ')
@@ -1018,13 +1025,6 @@ static int next_line_without_printing (char default_type) {
         assert (ch == ' ' || ch == '\n');
         if (!lit)
           return actual_type;
-      } else {
-        if (ch != ' ')
-          parse_error ("expected space after '%d'", lit);
-        if (!lit) {
-          ch = next_char ();
-          break;
-        }
       }
       assert (lit);
       PUSH (line.lits, lit);
@@ -1320,7 +1320,7 @@ static size_t reduce_hash (int64_t id, size_t size) {
   return ((size_t) id) & (size - 1);
 }
 
-static void enlarge_hash_table (struct hash_table *hash_table) {
+static size_t enlarge_hash_table (struct hash_table *hash_table) {
   size_t old_size = hash_table->size;
   size_t old_count = hash_table->count;
   struct clause **old_table = hash_table->table;
@@ -1349,6 +1349,7 @@ static void enlarge_hash_table (struct hash_table *hash_table) {
   hash_table->size = new_size;
   hash_table->table = new_table;
   free (old_table);
+  return new_size;
 }
 
 static struct clause *find_clause (struct hash_table *hash_table,
@@ -1374,7 +1375,7 @@ static void insert_clause (struct hash_table *hash_table,
   size_t size = hash_table->size;
   size_t count = hash_table->count;
   if (2 * count >= size)
-    enlarge_hash_table (hash_table);
+    size = enlarge_hash_table (hash_table);
   struct clause **table = hash_table->table;
   size_t start = reduce_hash (c->id, size), pos = start;
   for (;;) {
@@ -1487,7 +1488,7 @@ static int simplify_clause (struct clause *c, bool *satisfied,
   return unit;
 }
 
-static void add_clause (bool input) {
+static struct clause *add_clause (bool input) {
   struct clause *c = allocate_clause (input);
   watch_clause (c);
   bool satisfied = false, falsified = false;
@@ -1521,6 +1522,7 @@ static void add_clause (bool input) {
       inconsistent = true;
     }
   }
+  return c;
 }
 
 /*------------------------------------------------------------------------*/
@@ -1842,13 +1844,15 @@ static void conclude_query (int res) {
 // Merged checking options for each line.
 
 static void add_input_clause (int type) {
-  add_clause (true);
+  struct clause *c = add_clause (true);
+  insert_clause (&active, c);
   statistics.inputs++;
   (void) type;
 }
 
 static void check_then_add_lemma (int type) {
-  add_clause (false);
+  struct clause *c = add_clause (false);
+  insert_clause (&active, c);
   statistics.lemmas++;
   (void) type;
 }
@@ -2467,8 +2471,9 @@ static int parse_and_check_idrup (void) {
 // thus not only good style.  Reclaiming all memory combined with memory
 // checkers, e.g., 'configure -a' to compile with ASAN, allows to check
 // for memory leaks.  For the linear clause checker we use two hash tables
-// to map clause identifiers to clauses, one for active and one for inactive
-// clauses.  We traverse those hash tables to properly reclaim clauses.
+// to map clause identifiers to clauses, one for active and one for
+// inactive clauses.  We traverse those hash tables to properly reclaim
+// clauses.
 
 static void release_clauses_in_hash_table (struct hash_table *hash_table) {
   struct clause **table = hash_table->table;

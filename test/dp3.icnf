@@ -2,7 +2,7 @@ p icnf
 i 1 0
 q -1 0
 s UNSATISFIABLE
-u -1 0
+f -1 0
 i 1 0
 i 2 -4 0
 i 3 -4 0
@@ -45,7 +45,7 @@ i 18 -19 0
 i -8 -18 19 0
 q 19 0
 s UNSATISFIABLE
-u 19 0
+f 19 0
 i -19 0
 i 20 -22 0
 i 21 -22 0
@@ -244,7 +244,7 @@ i 92 -93 0
 i -23 -92 93 0
 q 93 0
 s UNSATISFIABLE
-u 93 0
+f 93 0
 i -93 0
 i 94 -96 0
 i 95 -96 0

@@ -173,8 +173,8 @@ static double start_time;
 /*------------------------------------------------------------------------*/
 
 static struct line line;  // Current line of integers parsed.
-static struct ints saved; // Saved line for matching lines.
-static struct ints query; // Saved query for checking.
+static struct lits saved; // Saved line for matching lines.
+static struct lits query; // Saved query for checking.
 
 // When saving a line the type and start of the line is saved too, where
 // with start-of-the-line we mean the line number in the file.
@@ -843,6 +843,13 @@ static int next_line_without_printing (char default_type) {
       break;
   }
 
+  // We have three 'types' denoting the letter 'i' etc. of the parsed line.
+  // The 'default_type' (if non-zero) is the one used in this context if the
+  // line does actually not contain a type (like in the DIMACS or original
+  // DRUP format).  The 'actual_type' is returned and allows to normalize
+  // types (for instance replacing 'a' with 'q').  The 'parsed_type' is the
+  // actual parsed letter (and zero if no letter was given).
+
   int parsed_type = 0;
   int actual_type = 0;
   string = 0;
@@ -880,9 +887,13 @@ static int next_line_without_printing (char default_type) {
   }
 
   if ('a' <= ch && ch <= 'z') {
-    parsed_type = actual_type = ch;
+    parsed_type = ch;
+    if (ch == 'a')
+      actual_type = 'q';
+    else
+      actual_type = ch;
     if ((ch = next_char ()) != ' ')
-      parse_error ("expected space after '%c'", actual_type);
+      parse_error ("expected space after '%c'", parsed_type);
     ch = next_char ();
   } else if (!default_type) {
     if (isprint (ch))
@@ -931,29 +942,42 @@ static int next_line_without_printing (char default_type) {
     parse_error ("expected space after '%c'", parsed_type);
 
   if (actual_type == 'i' || actual_type == 'l') {
+
+    assert (!line.id);
+
     ch = next_char ();
     if (!ISDIGIT (ch))
       parse_error ("expected clause identifier");
+    if (ch == '0')
+      parse_error ("expected non-zero clause identifier");
+
     int64_t id = ch - '0';
+
     while (ISDIGIT (ch = next_char ())) {
-      if (!id)
-        parse_error ("invalid leading '0' digit");
+      assert (id);
       if (INT64_MAX / 10 < id)
-        parse_error ("clause identifier to large");
+        parse_error ("clause identifier too large");
       id *= 10;
       int digit = ch - '0';
       if (INT64_MAX - digit < id)
-        parse_error ("clause identifier to large");
+        parse_error ("clause identifier too large");
       id += digit;
     }
+
     if (ch != ' ')
       parse_error ("expected space after '%" PRId64 "'", id);
+
+    assert (id);
     line.id = id;
   }
 
   if (actual_type == 'i' || actual_type == 'l' || actual_type == 'q' ||
       actual_type == 'm' || actual_type == 'u') {
+
+    assert (EMPTY (line.lits));
+
     for (;;) {
+
       int sign;
       if (ch == '-') {
         ch = next_char ();
@@ -967,7 +991,9 @@ static int next_line_without_printing (char default_type) {
           parse_error ("expected digit or '-'");
         sign = 1;
       }
+
       int idx = ch - '0';
+
       while (ISDIGIT (ch = next_char ())) {
         if (!idx)
           parse_error ("invalid leading '0' digit");
@@ -979,10 +1005,13 @@ static int next_line_without_printing (char default_type) {
           parse_error ("variable index too large");
         idx += digit;
       }
+
       if (idx)
         import_variable (idx);
+
       assert (idx != INT_MIN);
       int lit = sign * idx;
+
       if (actual_type == 'i' || actual_type == 'q' || actual_type == 'm') {
         if (!lit && ch != '\n')
           parse_error ("expected new-line after '0'");
@@ -997,18 +1026,68 @@ static int next_line_without_printing (char default_type) {
         if (!lit)
           break;
       }
+      assert (lit);
       PUSH (line.lits, lit);
       assert (ch == ' ');
       ch = next_char ();
     }
   }
 
+  assert (ch == ' ');
   assert (actual_type != 'i'); // TODO remove
   assert (actual_type != 'q'); // TODO remove
   assert (actual_type != 'm'); // TODO remove
 
   assert (actual_type == 'l' || actual_type == 'r' || actual_type == 'd' ||
           actual_type == 'w');
+
+  assert (EMPTY (line.ids));
+
+  for (;;) {
+
+    int sign;
+    ch = next_char ();
+    if (ch == '-') {
+      ch = next_char ();
+      if (ch == '0')
+        parse_error ("expected non-zero digit after '-'");
+      if (!ISDIGIT (ch))
+        parse_error ("expected digit after '-'");
+      sign = -1;
+    } else {
+      if (!ISDIGIT (ch))
+        parse_error ("expected digit or '-'");
+      sign = 1;
+    }
+
+    int64_t id = ch - '0';
+
+    while (ISDIGIT (ch = next_char ())) {
+      if (!id)
+        parse_error ("invalid leading '0' digit");
+      if (INT64_MAX / 10 < id)
+        parse_error ("antecedent clause identifier too large");
+      id *= 10;
+      int digit = ch - '0';
+      if (INT64_MAX - digit < id)
+        parse_error ("antecedent clause identifier too large");
+      id += digit;
+    }
+
+    if (id) {
+
+      id *= sign;
+      if (ch != ' ')
+        parse_error ("expected space after '%" PRId64 "'", id);
+
+      assert (id);
+      PUSH (line.ids, id);
+
+    } else if (ch != '\n')
+      parse_error ("expected new-line after '0'");
+    else
+      return actual_type;
+  }
 }
 
 static inline int next_line (char default_type) {
@@ -1148,23 +1227,23 @@ static void unmark_literal (int lit) {
   marks[lit] = false;
 }
 
-static void mark_literals (struct ints *lits) {
+static void mark_literals (struct lits *lits) {
   for (all_elements (int, lit, *lits))
     mark_literal (lit);
 }
 
-static void unmark_literals (struct ints *lits) {
+static void unmark_literals (struct lits *lits) {
   for (all_elements (int, lit, *lits))
     unmark_literal (lit);
 }
 
-static void mark_line (void) { mark_literals (&line); }
-static void unmark_line (void) { unmark_literals (&line); }
+static void mark_line (void) { mark_literals (&line.lits); }
+static void unmark_line (void) { unmark_literals (&line.lits); }
 
 static void mark_query (void) { mark_literals (&query); }
 static void unmark_query (void) { unmark_literals (&query); }
 
-static bool subset_literals (struct ints *a, struct ints *b) {
+static bool subset_literals (struct lits *a, struct lits *b) {
   mark_literals (b);
   bool res = true;
   for (all_elements (int, lit, *a)) {
@@ -1178,7 +1257,7 @@ static bool subset_literals (struct ints *a, struct ints *b) {
   return res;
 }
 
-static bool match_literals (struct ints *a, struct ints *b) {
+static bool match_literals (struct lits *a, struct lits *b) {
   return subset_literals (a, b) && subset_literals (b, a);
 }
 
@@ -1188,7 +1267,7 @@ static bool match_literals (struct ints *a, struct ints *b) {
 
 static bool line_is_tautological () {
   bool res = false;
-  for (all_elements (int, lit, line)) {
+  for (all_elements (int, lit, line.lits)) {
     assert (valid_literal (lit));
     if (!marks[lit]) {
       if (marks[-lit])
@@ -1201,7 +1280,7 @@ static bool line_is_tautological () {
 }
 
 static struct clause *allocate_clause (bool input) {
-  size_t size = SIZE (line);
+  size_t size = SIZE (line.lits);
   if (size > UINT_MAX)
     parse_error ("maximum clause size exhausted");
   size_t lits_bytes = size * sizeof (int);
@@ -1219,7 +1298,7 @@ static struct clause *allocate_clause (bool input) {
   c->weakened = false;
   c->input = input;
   c->tautological = line_is_tautological ();
-  memcpy (c->lits, line.begin, lits_bytes);
+  memcpy (c->lits, line.lits.begin, lits_bytes);
   debug_clause (c, "allocate");
   if (input)
     PUSH (input_clauses, c);
@@ -1432,7 +1511,7 @@ static void reset_checker (void) {
 
 static void save_query (void) {
   debug ("saving query");
-  COPY (int, query, line);
+  COPY (int, query, line.lits);
   start_of_query = file->start_of_line;
   statistics.queries++;
   reset_checker ();
@@ -1472,7 +1551,7 @@ static void check_implied (int type, const char *type_str, int sign) {
   // in the line as decision if 'sign=1' or their negation if 'sign=-1'.
 
   debug ("checking %s line is implied", type_str);
-  for (all_elements (int, lit, line)) {
+  for (all_elements (int, lit, line.lits)) {
     lit *= sign;
     signed char value = values[lit];
     if (value > 0) {
@@ -1507,7 +1586,7 @@ IMPLICATION_CHECK_SUCCEEDED:
 // require more space.
 
 static struct clause *find_empty_clause (bool weakened) {
-  assert (EMPTY (line));
+  assert (EMPTY (line.lits));
   for (all_pointers (struct clause, c, empty_clauses)) {
     if (c->weakened != weakened)
       continue;
@@ -1519,10 +1598,10 @@ static struct clause *find_empty_clause (bool weakened) {
 }
 
 static struct clause *find_non_empty_clause (bool weakened) {
-  size_t size = SIZE (line);
+  size_t size = SIZE (line.lits);
   assert (size);
   mark_line ();
-  for (all_elements (int, lit, line)) {
+  for (all_elements (int, lit, line.lits)) {
     struct clauses *watches = (weakened ? inactive : matrix) + lit;
     for (all_pointers (struct clause, c, *watches)) {
       if (c->size != size)
@@ -1544,7 +1623,7 @@ static struct clause *find_non_empty_clause (bool weakened) {
 }
 
 static struct clause *find_clause (bool weakened) {
-  if (EMPTY (line))
+  if (EMPTY (line.lits))
     return find_empty_clause (weakened);
   else
     return find_non_empty_clause (weakened);
@@ -1644,7 +1723,7 @@ static void restore_clause (struct clause *c) {
 // check for conclusions, i.e., for both 'm' models and 'u' core lines.
 
 static void check_line_consistency (int type) {
-  for (all_elements (int, lit, line)) {
+  for (all_elements (int, lit, line.lits)) {
     assert (valid_literal (lit));
     if (marks[-lit])
       check_error ("inconsistent '%c' line with both %d and %d", type, -lit,
@@ -1727,7 +1806,7 @@ static void check_literal_imported (int type, int lit) {
 
 static void check_literals_imported (int type) {
   debug ("checking literals imported");
-  for (all_elements (int, lit, line))
+  for (all_elements (int, lit, line.lits))
     check_literal_imported (type, lit);
 }
 
@@ -1816,7 +1895,7 @@ static void learn_delete_restore_or_weaken (int type) {
 
 static void match_saved (int type, const char *type_str) {
   debug ("matching saved line");
-  if (!match_literals (&line, &saved))
+  if (!match_literals (&line.lits, &saved))
     check_error ("%s '%c' line does not match '%c' line %zu in '%s'",
                  type_str, type, saved_type, start_of_saved,
                  other_file->name);
@@ -1825,7 +1904,7 @@ static void match_saved (int type, const char *type_str) {
 
 static void save_line (int type) {
   debug ("saving '%c' line", type);
-  COPY (int, saved, line);
+  COPY (int, saved, line.lits);
   start_of_saved = file->start_of_line;
   saved_type = type;
 }
@@ -1856,7 +1935,7 @@ static void check_line_satisfies_query (int type) {
 
 static void check_core_subset_of_query (int type) {
   mark_query ();
-  for (all_elements (int, lit, line))
+  for (all_elements (int, lit, line.lits))
     if (!marks[lit])
       check_error ("core literal %d not in query at line %zu in '%s'", lit,
                    start_of_query, interactions->name);
@@ -1867,7 +1946,7 @@ static void check_core_subset_of_query (int type) {
 
 static void check_line_variables_subset_of_query (int type) {
   mark_query ();
-  for (all_elements (int, lit, line))
+  for (all_elements (int, lit, line.lits))
     if (!marks[lit] && !marks[-lit])
       check_error ("literal %d nor %d in query at line %zu in '%s'", lit,
                    -lit, start_of_query, interactions->name);
@@ -1877,7 +1956,7 @@ static void check_line_variables_subset_of_query (int type) {
 }
 
 static void check_saved_failed_literals_match_core (int type) {
-  for (all_elements (int, lit, line))
+  for (all_elements (int, lit, line.lits))
     marks[lit] = true;
   for (all_elements (int, lit, saved))
     if (marks[-lit])
@@ -1888,7 +1967,7 @@ static void check_saved_failed_literals_match_core (int type) {
           "(as it occurs negated as '%d' there)",
           -lit, start_of_saved, interactions->name, lit);
   unmark_line ();
-  for (all_elements (int, lit, line))
+  for (all_elements (int, lit, line.lits))
     marks[lit] = false;
   (void) type;
 }
@@ -2429,7 +2508,8 @@ static void release_input_clauses (void) {
 }
 
 static void release (void) {
-  RELEASE (line);
+  RELEASE (line.lits);
+  RELEASE (line.ids);
   RELEASE (saved);
   RELEASE (query);
   release_active_clauses ();

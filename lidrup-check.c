@@ -953,6 +953,9 @@ static int next_line_without_printing (char default_type) {
 
     assert (!line.id);
 
+    if (ch == '-')
+      parse_error ("expected non-negative clause identifier "
+                   "(non-linear '.idrup' file?)");
     if (!ISDIGIT (ch))
       parse_error ("expected clause identifier");
     if (ch == '0')

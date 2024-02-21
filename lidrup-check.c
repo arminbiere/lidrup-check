@@ -1028,9 +1028,9 @@ static int next_line_without_printing (char default_type) {
         if (ch != ' ')
           parse_error ("expected space after '%d'", lit);
         if (!lit) {
-	  ch = next_char ();
+          ch = next_char ();
           break;
-	}
+        }
       }
       assert (lit);
       PUSH (line.lits, lit);
@@ -1043,8 +1043,8 @@ static int next_line_without_printing (char default_type) {
   assert (actual_type != 'q'); // TODO remove
   assert (actual_type != 'm'); // TODO remove
 
-  assert (actual_type == 'l' || actual_type == 'r' || actual_type == 'd' ||
-          actual_type == 'w');
+  assert (actual_type == 'l' || actual_type == 'u' || actual_type == 'r' ||
+          actual_type == 'd' || actual_type == 'w');
 
   assert (EMPTY (line.ids));
 
@@ -2464,6 +2464,7 @@ static int parse_and_check_idrup (void) {
 // the second time through its larger watch.
 
 static void release_active_clauses (void) {
+  debug ("releasing active clauses");
   for (int lit = -max_var; lit <= max_var; lit++) {
     if (!lit)
       continue;
@@ -2489,6 +2490,7 @@ static void release_active_clauses (void) {
 }
 
 static void release_inactive_clauses (void) {
+  debug ("releasing inactive clauses");
   for (int lit = -max_var; lit <= max_var; lit++) {
     if (!lit)
       continue;
@@ -2501,6 +2503,7 @@ static void release_inactive_clauses (void) {
 }
 
 static void release_empty_clauses (void) {
+  debug ("releasing empty clauses");
   for (all_pointers (struct clause, c, empty_clauses))
     if (!c->input)
       free_clause (c);
@@ -2508,6 +2511,7 @@ static void release_empty_clauses (void) {
 }
 
 static void release_input_clauses (void) {
+  debug ("releasing input clauses");
   for (all_pointers (struct clause, c, input_clauses))
     free_clause (c);
   RELEASE (input_clauses);

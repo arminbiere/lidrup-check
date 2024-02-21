@@ -477,7 +477,7 @@ static bool type_has_id (int t) { return t == 'i' || t == 'l'; }
 
 static bool type_has_lits (int t) {
   return t == 'i' || t == 'l' || t == 'q' || t == 'm' || t == 'u' ||
-         t == 'v';
+         t == 'v' || t == 'f';
 }
 
 static bool type_has_ids (int t) {
@@ -2191,7 +2191,8 @@ static int parse_and_check_icnf_and_idrup (void) {
 
   int res = 0; // The exit code of the program without error.
 
-  message ("interaction and proof checking in %s mode", mode_string ());
+  message ("parallel interaction and proof checking in %s mode",
+           mode_string ());
   goto INTERACTION_HEADER; // Explicitly start with this state.
 
   // In order to build a clean state-machine the basic block of each
@@ -2449,7 +2450,7 @@ static int parse_and_check_idrup (void) {
   int res = 0; // See comments above why we have this redundant 'res'.
 
   set_file (proof);
-  message ("proof checking in %s mode", mode_string ());
+  message ("sequential checking only proof in %s mode", mode_string ());
   goto PROOF_HEADER;
 
   {

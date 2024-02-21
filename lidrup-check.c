@@ -465,6 +465,16 @@ static void check_error (const char *fmt, ...) {
   exit (1);
 }
 
+static bool type_has_id (int t) { return t == 'i' || t == 'l'; }
+
+static bool type_has_lits (int t) {
+  return t == 'i' || t == 'l' || t == 'q' || t == 'm' || t == 'q';
+}
+
+static bool type_has_ids (int t) {
+  return t == 'l' || t == 'd' || t == 'w' || t == 'r';
+}
+
 static void line_error (int type, const char *, ...)
     __attribute__ ((format (printf, 2, 3)));
 
@@ -481,19 +491,18 @@ static void line_error (int type, const char *fmt, ...) {
   va_end (ap);
   fputc ('\n', stderr);
   fputc (type, stderr);
-  if (type == 'i' || type == 'l' || type == 'w' || type == 'r') {
+  if (type_has_id (type)) {
     assert (line.id > 0);
     printf (" %" PRId64, line.id);
   } else
     assert (!line.id);
-  if (type == 'i' || type == 'l' || type == 'q' || type == 'm' ||
-      type == 'u') {
+  if (type_has_lits (type)) {
     for (all_elements (int, lit, line.lits))
       fprintf (stderr, " %d", lit);
     fputs (" 0\n", stderr);
   } else
     assert (EMPTY (line.lits));
-  if (type == 'l' || type == 'u') {
+  if (type_has_ids (type)) {
     for (all_elements (int64_t, id, line.ids))
       fprintf (stderr, " %" PRId64, id);
     fputs (" 0\n", stderr);
@@ -525,26 +534,24 @@ static void debug_print_parsed_line (int type) {
   assert (file);
   printf ("c DEBUG %u parsed line %zu in '%s': ", level, file->lineno,
           file->name);
-  switch (type) {
-  case 'p':
-    fputs ("p ", stdout);
-    assert (string);
-    fputs (string, stdout);
-    break;
-  case 's':
-    fputs ("s ", stdout);
-    assert (string);
-    fputs (string, stdout);
-    break;
-  case 0:
+  if (!type)
     fputs ("<end-of-file>", stdout);
-    break;
-  default:
-    fputc (type, stdout);
-    for (const int *p = line.lits.begin; p != line.lits.end; p++)
-      printf (" %d", *p);
-    fputs (" 0", stdout);
-    break;
+  else if (type == 'p' || type == 's')
+    printf ("%c %s", type, string);
+  else {
+    printf ("%c", type);
+    if (type_has_id (type))
+      printf (" %" PRId64, line.id);
+    if (type_has_lits (type)) {
+      for (const int *p = line.lits.begin; p != line.lits.end; p++)
+        printf (" %d", *p);
+      fputs (" 0", stdout);
+    }
+    if (type_has_ids (type)) {
+      for (const int64_t *p = line.ids.begin; p != line.ids.end; p++)
+        printf (" %" PRId64, *p);
+      fputs (" 0", stdout);
+    }
   }
   fputc ('\n', stdout);
   fflush (stdout);
@@ -932,7 +939,7 @@ static int next_line_without_printing (char default_type) {
     return 's';
   }
 
-  if (actual_type == 'i' || actual_type == 'l') {
+  if (type_has_id (actual_type)) {
 
     assert (!line.id);
 
@@ -963,8 +970,7 @@ static int next_line_without_printing (char default_type) {
     ch = next_char ();
   }
 
-  if (actual_type == 'i' || actual_type == 'l' || actual_type == 'q' ||
-      actual_type == 'm' || actual_type == 'u') {
+  if (type_has_lits (actual_type)) {
 
     assert (EMPTY (line.lits));
 
@@ -1027,13 +1033,7 @@ static int next_line_without_printing (char default_type) {
     }
   }
 
-  assert (actual_type != 'i'); // TODO remove
-  assert (actual_type != 'q'); // TODO remove
-  assert (actual_type != 'm'); // TODO remove
-
-  assert (actual_type == 'l' || actual_type == 'u' || actual_type == 'r' ||
-          actual_type == 'd' || actual_type == 'w');
-
+  assert (type_has_ids (actual_type));
   assert (EMPTY (line.ids));
 
   for (;;) {
@@ -1885,13 +1885,13 @@ static void find_then_delete_clauses (int type) {
 }
 
 static void find_then_weaken_clauses (int type) {
-  assert (type == 'd');
+  assert (type == 'w');
   for (all_elements (int64_t, id, line.ids))
     find_then_weaken_clause (type, id);
 }
 
 static void find_then_restore_clauses (int type) {
-  assert (type == 'd');
+  assert (type == 'r');
   for (all_elements (int64_t, id, line.ids))
     find_then_restore_clause (type, id);
 }

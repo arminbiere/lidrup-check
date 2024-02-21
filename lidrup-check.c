@@ -816,6 +816,7 @@ static int ISDIGIT (int ch) { return '0' <= ch && ch <= '9'; }
 static int next_line_without_printing (char default_type) {
 
   int ch;
+
   for (;;) {
     ch = next_char ();
     file->start_of_line = file->lineno;
@@ -854,7 +855,7 @@ static int next_line_without_printing (char default_type) {
   if (ch == 'p') {
     if (next_char () != ' ')
     INVALID_HEADER_LINE:
-      parse_error ("invalid 'p ...' header line");
+      parse_error ("invalid 'p' header line");
 
     ch = next_char ();
     if (ch == 'i') {
@@ -926,7 +927,7 @@ static int next_line_without_printing (char default_type) {
     return 's';
   }
 
-  if (parsed_type && (ch != ' ')
+  if (parsed_type && (ch != ' '))
     parse_error ("expected space after '%c'", parsed_type);
 
   if (actual_type == 'i' || actual_type == 'l') {
@@ -938,11 +939,11 @@ static int next_line_without_printing (char default_type) {
       if (!id)
         parse_error ("invalid leading '0' digit");
       if (INT64_MAX / 10 < id)
-        parser ("clause identifier to large");
+        parse_error ("clause identifier to large");
       id *= 10;
       int digit = ch - '0';
       if (INT64_MAX - digit < id)
-        parser ("clause identifier to large");
+        parse_error ("clause identifier to large");
       id += digit;
     }
     if (ch != ' ')
@@ -982,7 +983,7 @@ static int next_line_without_printing (char default_type) {
         import_variable (idx);
       assert (idx != INT_MIN);
       int lit = sign * idx;
-      if (actual_type == 'q' || actual_type == 'm') {
+      if (actual_type == 'i' || actual_type == 'q' || actual_type == 'm') {
         if (!lit && ch != '\n')
           parse_error ("expected new-line after '0'");
         if (lit && ch != ' ')
@@ -996,13 +997,18 @@ static int next_line_without_printing (char default_type) {
         if (!lit)
           break;
       }
-      PUSH (line, lit);
+      PUSH (line.lits, lit);
       assert (ch == ' ');
       ch = next_char ();
     }
   }
 
-  if (acutl
+  assert (actual_type != 'i'); // TODO remove
+  assert (actual_type != 'q'); // TODO remove
+  assert (actual_type != 'm'); // TODO remove
+
+  assert (actual_type == 'l' || actual_type == 'r' || actual_type == 'd' ||
+          actual_type == 'w');
 }
 
 static inline int next_line (char default_type) {

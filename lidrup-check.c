@@ -121,12 +121,12 @@ struct file {
 };
 
 struct clause {
-  int64_t id;
+  int64_t id; // Clause id and hash key for hash tables.
 #ifndef NDEBUG
-  size_t lineno;
+  size_t lineno; // For better error messages.
 #endif
   bool input;        // Input clauses are never freed.
-  bool weakened;     // Weakened clause are inactive (and one-watched).
+  bool weakened;     // Weakened clauses are inactive.
   bool tautological; // Tautological clauses are always satisfied.
   unsigned size;     // The actual allocated size of 'lits'.
   int lits[];        // Flexible array member: lits[0], ..., lits[size-1].
@@ -134,6 +134,11 @@ struct clause {
 
 struct clauses {
   struct clause **begin, **end, **allocated;
+};
+
+struct hash_table {
+  struct clause **table;
+  size_t count, size;
 };
 
 /*------------------------------------------------------------------------*/
@@ -202,15 +207,16 @@ static const char *string;
 
 // Checker state.
 
-static int max_var;              // Maximum variable index imported.
-static size_t allocated;         // Allocated variables (>= 'max_var').
-static unsigned level;           // Decision level (number assumptions).
-static bool *imported;           // Variable index imported?
-static unsigned *levels;         // Decision level of assigned variables.
-static struct clauses *matrix;   // Mapping literals to watcher stacks.
-static struct clauses *inactive; // Inactive weakened clauses.
-static signed char *values;      // Assignment of literal: -1, 0, or 1.
-static bool *marks;              // Marks of literals.
+static int max_var;                // Maximum variable index imported.
+static size_t allocated;           // Allocated variables (>= 'max_var').
+static unsigned level;             // Decision level (number assumptions).
+static bool *imported;             // Variable index imported?
+static unsigned *levels;           // Decision level of assigned variables.
+static struct clauses *matrix;     // Mapping literals to watcher stacks.
+static struct hash_table active;   // Active clauses (map ID to clause).
+static struct hash_table inactive; // Inactive clauses (map ID to clause).
+static signed char *values;        // Assignment of literal: -1, 0, or 1.
+static bool *marks;                // Marks of literals.
 
 // This is the default preallocated trail. It is only resized during
 // importing a new variable and thus allows simpler 'push' operations,
@@ -225,10 +231,6 @@ static struct {
 // Maps decision level to trail heights.
 
 static bool inconsistent; // Empty clause derived.
-
-// Need to store empty clauses on a separate stack as they are not watched.
-
-static struct clauses empty_clauses;
 
 // Input clauses are never actually deleted as they are needed for checking
 // that models satisfy them.
@@ -669,20 +671,6 @@ static void increase_allocated (int idx) {
     matrix -= allocated;
     free (matrix);
     matrix = new_matrix;
-  }
-  {
-    struct clauses *new_inactive =
-        calloc (2 * new_allocated, sizeof *new_inactive);
-    if (!new_inactive)
-      out_of_memory ("reallocating inactive matrix of size %zu",
-                     new_allocated);
-    new_inactive += new_allocated;
-    if (max_var)
-      for (int lit = -max_var; lit <= max_var; lit++)
-        new_inactive[lit] = inactive[lit];
-    inactive -= allocated;
-    free (inactive);
-    inactive = new_inactive;
   }
   {
     signed char *new_values =
@@ -1312,8 +1300,111 @@ static struct clause *allocate_clause (bool input) {
 
 static void free_clause (struct clause *c) {
   debug ("freeing clause at %p", (void *) c);
-  debug_clause (c, "free");
+  debug_clause (c, "freeing");
   free (c);
+}
+
+/*------------------------------------------------------------------------*/
+
+// Hash table insertion of clauses based on their ID.
+
+#define REMOVED ((struct clause *) (~(uintptr_t) 1))
+
+#ifndef NDEBUG
+static bool is_power_of_two (size_t n) { return n && !(n & (n - 1)); }
+#endif
+
+static size_t reduce_hash (int64_t id, size_t size) {
+  assert (id > 0);
+  assert (is_power_of_two (size));
+  return ((size_t) id) & (size - 1);
+}
+
+static void enlarge_hash_table (struct hash_table *hash_table) {
+  size_t old_size = hash_table->size;
+  size_t old_count = hash_table->count;
+  struct clause **old_table = hash_table->table;
+  size_t new_size = old_size ? 2 * old_size : 1;
+  struct clause **new_table = calloc (new_size, sizeof *new_table);
+  if (!new_table)
+    out_of_memory ("enlarging hash table of size %zu", old_size);
+  size_t removed = 0;
+  struct clause **const end_of_old_table = old_table + old_size;
+  for (struct clause **p = old_table; p != end_of_old_table; p++) {
+    struct clause *c = *p;
+    if (!c)
+      continue;
+    if (c == REMOVED) {
+      removed++;
+      continue;
+    }
+    size_t new_pos = reduce_hash (c->id, new_size);
+    while (new_table[new_pos])
+      if (++new_pos == new_size)
+        new_pos = 1;
+    new_table[new_pos] = c;
+  }
+  size_t new_count = old_count - removed;
+  hash_table->count = new_count;
+  hash_table->size = new_size;
+  hash_table->table = new_table;
+  free (old_table);
+}
+
+static struct clause *find_clause (struct hash_table *hash_table,
+                                   int64_t id) {
+  size_t size = hash_table->size;
+  if (!size)
+    return 0;
+  struct clause **table = hash_table->table;
+  size_t start = reduce_hash (id, size), pos = start;
+  for (;;) {
+    struct clause *res = table[pos];
+    if (!res || (res != REMOVED && res->id == id))
+      return res;
+    if (++pos == size)
+      pos = 0;
+    if (pos == start)
+      return 0;
+  }
+}
+
+static void insert_clause (struct hash_table *hash_table,
+                           struct clause *c) {
+  size_t size = hash_table->size;
+  size_t count = hash_table->count;
+  if (2 * count >= size)
+    enlarge_hash_table (hash_table);
+  struct clause **table = hash_table->table;
+  size_t start = reduce_hash (c->id, size), pos = start;
+  for (;;) {
+    struct clause *res = table[pos];
+    if (res <= REMOVED)
+      break;
+    assert (res != c);
+    if (++pos == size)
+      pos = 0;
+    assert (pos != start);
+  }
+  hash_table->count = count + 1;
+  table[pos] = c;
+}
+
+static void remove_clause (struct hash_table *hash_table,
+                           struct clause *c) {
+  size_t size = hash_table->size;
+  struct clause **table = hash_table->table;
+  size_t start = reduce_hash (c->id, size), pos = start;
+  for (;;) {
+    struct clause *res = table[pos];
+    if (res == c)
+      break;
+    assert (res);
+    if (++pos == size)
+      pos = 0;
+    assert (pos != start);
+  }
+  table[pos] = REMOVED;
 }
 
 /*------------------------------------------------------------------------*/
@@ -1336,18 +1427,7 @@ static void unwatch_clause (struct clause *c) {
     unwatch_literal (c->lits[0], c);
     if (c->size > 1)
       unwatch_literal (c->lits[1], c);
-  } else
-    REMOVE (struct clause *, empty_clauses, c);
-}
-
-static void connect_literal (int lit, struct clause *c) {
-  debug_clause (c, "connecting %d to", lit);
-  PUSH (inactive[lit], c);
-}
-
-static void disconnect_literal (int lit, struct clause *c) {
-  debug_clause (c, "disconnecting %d from", lit);
-  REMOVE (struct clause *, inactive[lit], c);
+  }
 }
 
 static int move_best_watch_to_front (int *lits, const int *const end) {
@@ -1370,8 +1450,8 @@ static int move_best_watch_to_front (int *lits, const int *const end) {
 static void watch_clause (struct clause *c) {
   assert (!level);
   if (!c->size)
-    PUSH (empty_clauses, c);
-  else if (c->size == 1)
+    return;
+  if (c->size == 1)
     watch_literal (c->lits[0], c);
   else {
     int *lits = c->lits;
@@ -1584,99 +1664,13 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 /*------------------------------------------------------------------------*/
 
-// Clauses are found by marking the literals in the line and then
-// traversing the watches of them to find all clause of the same size with
-// all literals marked and active (not weakened).  It might be possible to
-// speed up this part with hash table, which on the other hand would
-// require more space.
-
-static struct clause *find_empty_clause (bool weakened) {
-  assert (EMPTY (line.lits));
-  for (all_pointers (struct clause, c, empty_clauses)) {
-    if (c->weakened != weakened)
-      continue;
-    debug_clause (c, "found_matching");
-    return c;
-  }
-  debug ("no matching clause found");
-  return 0;
-}
-
-static struct clause *find_non_empty_clause (bool weakened) {
-  size_t size = SIZE (line.lits);
-  assert (size);
-  mark_line ();
-  for (all_elements (int, lit, line.lits)) {
-    struct clauses *watches = (weakened ? inactive : matrix) + lit;
-    for (all_pointers (struct clause, c, *watches)) {
-      if (c->size != size)
-        continue;
-      if (c->weakened != weakened)
-        continue;
-      for (all_literals (other, c))
-        if (!marks[other])
-          goto CONTINUE_WITH_NEXT_CLAUSE;
-      unmark_line ();
-      debug_clause (c, "found matching");
-      return c;
-    CONTINUE_WITH_NEXT_CLAUSE:;
-    }
-  }
-  unmark_line ();
-  debug ("no matching clause found");
-  return 0;
-}
-
-static struct clause *find_clause (bool weakened) {
-  if (EMPTY (line.lits))
-    return find_empty_clause (weakened);
-  else
-    return find_non_empty_clause (weakened);
-}
-
-static struct clause *find_active_clause (void) {
-  debug ("finding active clause");
-  return find_clause (false);
-}
-
-static struct clause *find_weakened_clause (void) {
-  debug ("finding weakened clause");
-  return find_clause (true);
-}
-
-static int
-move_least_occurring_inactive_literal_to_front (struct clause *c) {
-  assert (c->size);
-  int *lits = c->lits;
-  int res = lits[0];
-  size_t res_occurrences = SIZE (inactive[res]);
-  const int *const end = lits + c->size;
-  for (int *p = lits + 1; p != end; p++) {
-    int other = *p;
-    size_t other_occurrences = SIZE (inactive[other]);
-    if (other_occurrences >= res_occurrences)
-      continue;
-    *p = res;
-    res = other;
-    res_occurrences = other_occurrences;
-  }
-  lits[0] = res;
-  assert (res);
-  debug ("literal %s occurs only %zu times", debug_literal (res),
-         res_occurrences);
-  return res;
-}
-
-/*------------------------------------------------------------------------*/
-
 // This section has all the low-level checks.
 
 static void delete_clause (struct clause *c) {
   assert (!c->weakened);
-  debug ("deleting clause");
   unwatch_clause (c);
   if (c->input)
-    debug_clause (c, "but not freeing");
+    debug_clause (c, "deleting but not freeing");
   else
     free_clause (c);
   statistics.deleted++;
@@ -1687,10 +1681,8 @@ static void weaken_clause (struct clause *c) {
   debug_clause (c, "weakening");
   unwatch_clause (c);
   c->weakened = true;
-  if (c->size) {
-    int lit = move_least_occurring_inactive_literal_to_front (c);
-    connect_literal (lit, c);
-  }
+  remove_clause (&active, c);
+  insert_clause (&inactive, c);
   statistics.weakened++;
 }
 
@@ -1698,9 +1690,10 @@ static void restore_clause (struct clause *c) {
   assert (!level);
   assert (c->weakened);
   debug_clause (c, "restoring");
+  remove_clause (&inactive, c);
+  insert_clause (&active, c);
   if (c->size) {
     int *lits = begin_literals (c);
-    disconnect_literal (*lits, c);
     watch_clause (c);
     int lit0 = lits[0];
     int val0 = values[lit0];
@@ -1797,6 +1790,10 @@ static void check_line_propagation_yields_conflict (int type) {
 
 /*------------------------------------------------------------------------*/
 
+// TODO remove or add back?
+
+#if 0
+
 // Check that the given literal has been imported before.  This in a
 // certain sense is redundant for checking correctness but gives more
 // useful error messages and should be really cheap anyhow since it does
@@ -1814,6 +1811,8 @@ static void check_literals_imported (int type) {
   for (all_elements (int, lit, line.lits))
     check_literal_imported (type, lit);
 }
+
+#endif
 
 /*------------------------------------------------------------------------*/
 
@@ -1849,36 +1848,52 @@ static void add_input_clause (int type) {
 }
 
 static void check_then_add_lemma (int type) {
-  check_implied (type, "lemma", -1);
   add_clause (false);
   statistics.lemmas++;
+  (void) type;
 }
 
-static void find_then_delete_clause (int type) {
-  check_literals_imported (type);
-  struct clause *c = find_active_clause ();
+static void find_then_delete_clause (int type, int64_t id) {
+  struct clause *c = find_clause (&active, id);
   if (c)
     delete_clause (c);
   else
-    line_error (type, "could not find clause");
+    line_error (type, "could not find and delete clause %" PRId64, id);
 }
 
-static void find_then_restore_clause (int type) {
-  check_literals_imported (type);
-  struct clause *c = find_weakened_clause ();
-  if (c)
-    restore_clause (c);
-  else
-    line_error (type, "could not find and restore weakened clause");
-}
-
-static void find_then_weaken_clause (int type) {
-  check_literals_imported (type);
-  struct clause *c = find_active_clause ();
+static void find_then_weaken_clause (int type, int64_t id) {
+  struct clause *c = find_clause (&active, id);
   if (c)
     weaken_clause (c);
   else
-    line_error (type, "could not find and weaken clause");
+    line_error (type, "could not find and weaken clause %" PRId64, id);
+}
+
+static void find_then_restore_clause (int type, int64_t id) {
+  struct clause *c = find_clause (&inactive, id);
+  if (c)
+    restore_clause (c);
+  else
+    line_error (type, "could not find and restore weakened clause %" PRId64,
+                id);
+}
+
+static void find_then_delete_clauses (int type) {
+  assert (type == 'd');
+  for (all_elements (int64_t, id, line.ids))
+    find_then_delete_clause (type, id);
+}
+
+static void find_then_weaken_clauses (int type) {
+  assert (type == 'd');
+  for (all_elements (int64_t, id, line.ids))
+    find_then_weaken_clause (type, id);
+}
+
+static void find_then_restore_clauses (int type) {
+  assert (type == 'd');
+  for (all_elements (int64_t, id, line.ids))
+    find_then_restore_clause (type, id);
 }
 
 static bool is_learn_delete_restore_or_weaken (int type) {
@@ -1889,12 +1904,12 @@ static void learn_delete_restore_or_weaken (int type) {
   if (type == 'l')
     check_then_add_lemma (type);
   else if (type == 'd')
-    find_then_delete_clause (type);
+    find_then_delete_clauses (type);
   else if (type == 'r')
-    find_then_restore_clause (type);
+    find_then_restore_clauses (type);
   else {
     assert (type == 'w');
-    find_then_weaken_clause (type);
+    find_then_weaken_clauses (type);
   }
 }
 
@@ -2451,63 +2466,26 @@ static int parse_and_check_idrup (void) {
 // leaks reclaiming all memory before successfully exiting the checker is
 // thus not only good style.  Reclaiming all memory combined with memory
 // checkers, e.g., 'configure -a' to compile with ASAN, allows to check
-// for memory leaks.  It is however non-trivial to enforce though as we
-// can only find all the clauses through their watches, do move clauses
-// between the two-watched active clause set and the one-watched passive
-// clause set, in combination with never deleting input clauses, having
-// only one watch for unit clauses anyhow and finally also gracefully
-// handle tautological clauses (which might have the same watched literal
-// twice).
+// for memory leaks.  For the linear clause checker we use two hash tables
+// to map clause identifiers to clauses, one for active and one for inactive
+// clauses.  We traverse those hash tables to properly reclaim clauses.
 
-// Without a global list of clauses we traverse watch lists during
-// deallocation of clauses and only deallocate a clauses if we visit it
-// the second time through its larger watch.
+static void release_clauses_in_hash_table (struct hash_table *hash_table) {
+  struct clause **table = hash_table->table;
+  struct clause **end = table + hash_table->size;
+  for (struct clause **p = table, *c; p != end; p++)
+    if ((c = *p) > REMOVED && !c->input)
+      free_clause (c);
+}
 
 static void release_active_clauses (void) {
   debug ("releasing active clauses");
-  for (int lit = -max_var; lit <= max_var; lit++) {
-    if (!lit)
-      continue;
-    struct clauses *watches = matrix + lit;
-    for (all_pointers (struct clause, c, *watches)) {
-      if (c->input)
-        continue; // Released separately.
-      if (c->size < 2) {
-        assert (c->size == 1);
-        free_clause (c);
-      } else {
-        assert (c->size >= 2);
-        int *lits = c->lits;
-        int other = lits[0] ^ lits[1] ^ lit;
-        if (other == lit)
-          lits[0] = INT_MIN; // Care for tautological clauses.
-        else if (other < lit)
-          free_clause (c); // Second visit of clause.
-      }
-    }
-    RELEASE (*watches);
-  }
+  release_clauses_in_hash_table (&active);
 }
 
 static void release_inactive_clauses (void) {
   debug ("releasing inactive clauses");
-  for (int lit = -max_var; lit <= max_var; lit++) {
-    if (!lit)
-      continue;
-    struct clauses *watches = inactive + lit;
-    for (all_pointers (struct clause, c, *watches))
-      if (!c->input)
-        free_clause (c);
-    RELEASE (*watches);
-  }
-}
-
-static void release_empty_clauses (void) {
-  debug ("releasing empty clauses");
-  for (all_pointers (struct clause, c, empty_clauses))
-    if (!c->input)
-      free_clause (c);
-  RELEASE (empty_clauses);
+  release_clauses_in_hash_table (&inactive);
 }
 
 static void release_input_clauses (void) {
@@ -2524,13 +2502,12 @@ static void release (void) {
   RELEASE (query);
   release_active_clauses ();
   release_inactive_clauses ();
-  release_empty_clauses ();
   release_input_clauses ();
+  free (active.table);
+  free (inactive.table);
   free (trail.begin);
   matrix -= allocated;
   free (matrix);
-  inactive -= allocated;
-  free (inactive);
   values -= allocated;
   free (values);
   marks -= allocated;

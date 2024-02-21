@@ -1,10 +1,10 @@
 c testing some basic tautological clause handling
 p lidrup
-3 1 4 1 1 -1 2 0
-q 0
-l 3 3 4 -4 -2 0
-w -1 1 1 1 2 3 4 0
-l 2 2 2 1 -2 0
-r 1 1 1 3 4 -1 2 0
+1 3 1 4 1 1 -1 2 0
+a 0
+l 2 3 3 4 -4 -2 0 0
+w 1 0
+l 3 2 2 2 1 -2 0
+r 1 0
 s SATISFIABLE
 m 0

@@ -121,8 +121,8 @@ struct file {
 };
 
 struct clause {
+  int64_t id;
 #ifndef NDEBUG
-  size_t id;
   size_t lineno;
 #endif
   bool input;        // Input clauses are never freed.
@@ -585,7 +585,8 @@ static void debug_clause (struct clause *c, const char *fmt, ...) {
     fputs (" input", stdout);
   else
     fputs (" lemma", stdout);
-  printf (" size %u line %zu clause[%zu]", c->size, c->lineno, c->id);
+  printf (" size %u line %zu clause[%" PRId64 "]", c->size, c->lineno,
+          c->id);
   for (all_literals (lit, c))
     printf (" %s", debug_literal (lit));
   fputc ('\n', stdout);
@@ -1026,8 +1027,10 @@ static int next_line_without_printing (char default_type) {
       } else {
         if (ch != ' ')
           parse_error ("expected space after '%d'", lit);
-        if (!lit)
+        if (!lit) {
+	  ch = next_char ();
           break;
+	}
       }
       assert (lit);
       PUSH (line.lits, lit);
@@ -1036,7 +1039,6 @@ static int next_line_without_printing (char default_type) {
     }
   }
 
-  assert (ch == ' ');
   assert (actual_type != 'i'); // TODO remove
   assert (actual_type != 'q'); // TODO remove
   assert (actual_type != 'm'); // TODO remove
@@ -1049,7 +1051,6 @@ static int next_line_without_printing (char default_type) {
   for (;;) {
 
     int sign;
-    ch = next_char ();
     if (ch == '-') {
       ch = next_char ();
       if (ch == '0')
@@ -1085,6 +1086,7 @@ static int next_line_without_printing (char default_type) {
 
       assert (id);
       PUSH (line.ids, id);
+      ch = next_char ();
 
     } else if (ch != '\n')
       parse_error ("expected new-line after '0'");
@@ -1292,9 +1294,8 @@ static struct clause *allocate_clause (bool input) {
   if (!c)
     out_of_memory ("allocating clause of size %zu", size);
   assert (file);
-  statistics.added++;
+  c->id = line.id;
 #ifndef NDEBUG
-  c->id = statistics.added;
   c->lineno = file->start_of_line;
 #endif
   c->size = size;
@@ -1305,6 +1306,7 @@ static struct clause *allocate_clause (bool input) {
   debug_clause (c, "allocate");
   if (input)
     PUSH (input_clauses, c);
+  statistics.added++;
   return c;
 }
 
@@ -2500,7 +2502,8 @@ static void release_inactive_clauses (void) {
 
 static void release_empty_clauses (void) {
   for (all_pointers (struct clause, c, empty_clauses))
-    free_clause (c);
+    if (!c->input)
+      free_clause (c);
   RELEASE (empty_clauses);
 }
 

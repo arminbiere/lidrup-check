@@ -53,6 +53,7 @@ while [ $files -le 2 ]
 do
 
 run 0 empty
+run 0 empty2
 run 0 unit0
 run 0 unit1
 run 0 taut

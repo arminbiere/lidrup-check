@@ -141,6 +141,11 @@ struct hash_table {
   size_t count, size;
 };
 
+struct bit_table {
+  uint64_t *words;
+  size_t count, size;
+};
+
 /*------------------------------------------------------------------------*/
 
 // Global command line run-time options.
@@ -215,6 +220,7 @@ static unsigned *levels;           // Decision level of assigned variables.
 static struct clauses *matrix;     // Mapping literals to watcher stacks.
 static struct hash_table active;   // Active clauses (map ID to clause).
 static struct hash_table inactive; // Inactive clauses (map ID to clause).
+static struct bit_table used;      // Used clause identifiers.
 static signed char *values;        // Assignment of literal: -1, 0, or 1.
 static bool *marks;                // Marks of literals.
 
@@ -500,15 +506,16 @@ static void line_error (int type, const char *fmt, ...) {
   if (type_has_lits (type)) {
     for (all_elements (int, lit, line.lits))
       fprintf (stderr, " %d", lit);
-    fputs (" 0\n", stderr);
+    fputs (" 0", stderr);
   } else
     assert (EMPTY (line.lits));
   if (type_has_ids (type)) {
     for (all_elements (int64_t, id, line.ids))
       fprintf (stderr, " %" PRId64, id);
-    fputs (" 0\n", stderr);
+    fputs (" 0", stderr);
   } else
     assert (EMPTY (line.ids));
+  fputc ('\n', stderr);
   exit (1);
 }
 
@@ -1411,6 +1418,51 @@ static void remove_clause (struct hash_table *hash_table,
 
 /*------------------------------------------------------------------------*/
 
+static bool contains_bit (struct bit_table *bits, int64_t id) {
+  size_t word_size = bits->size;
+  if (!word_size)
+    return false;
+  size_t id_pos = id;
+  size_t id_word_pos = id_pos >> 6;
+  if (id_word_pos >= word_size)
+    return false;
+  unsigned id_word_bit = id_pos & 63;
+  uint64_t id_word_mask = ((uint64_t) 1) << id_word_bit;
+  return bits->words[id_word_pos] & id_word_mask;
+}
+
+static void enlarge_bit_table (struct bit_table *bits,
+                               size_t new_word_size) {
+  size_t old_word_size = bits->size;
+  assert (old_word_size < new_word_size);
+  size_t delta_word_size = new_word_size - old_word_size;
+  size_t delta_bytes = delta_word_size * 8;
+  size_t new_bytes = new_word_size * 8;
+  bits->words = realloc (bits->words, new_bytes);
+  if (!bits->words)
+    out_of_memory ("allocating used ids table");
+  memset (bits->words + old_word_size, 0, delta_bytes);
+  bits->size = new_word_size;
+}
+
+static void insert_bit (struct bit_table *bits, int64_t id) {
+  size_t old_word_size = bits->size;
+  size_t id_pos = id;
+  size_t id_word_pos = id_pos >> 6;
+  if (id_word_pos >= old_word_size) {
+    size_t new_word_size = old_word_size ? 2 * old_word_size : 1;
+    while (new_word_size <= id_word_pos)
+      new_word_size *= 2;
+    enlarge_bit_table (bits, new_word_size);
+  }
+  unsigned id_word_bit = id_pos & 63;
+  uint64_t id_word_mask = ((uint64_t) 1) << id_word_bit;
+  assert (!(bits->words[id_word_pos] & id_word_mask));
+  bits->words[id_word_pos] |= id_word_mask;
+}
+
+/*------------------------------------------------------------------------*/
+
 // Watching and connecting literals is implementing here.
 
 static void watch_literal (int lit, struct clause *c) {
@@ -1669,6 +1721,15 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 // This section has all the low-level checks.
 
+static void check_clause_id_unused (int type) {
+  assert (line.id);
+  if (contains_bit (&used, line.id))
+    line_error (type, "clause identifier %" PRId64 " already in use",
+                line.id);
+  else
+    insert_bit (&used, line.id);
+}
+
 static void delete_clause (struct clause *c) {
   assert (!c->weakened);
   unwatch_clause (c);
@@ -1845,6 +1906,7 @@ static void conclude_query (int res) {
 // Merged checking options for each line.
 
 static void add_input_clause (int type) {
+  check_clause_id_unused (type);
   struct clause *c = add_clause (true);
   insert_clause (&active, c);
   statistics.inputs++;
@@ -1852,6 +1914,7 @@ static void add_input_clause (int type) {
 }
 
 static void check_then_add_lemma (int type) {
+  check_clause_id_unused (type);
   struct clause *c = add_clause (false);
   insert_clause (&active, c);
   statistics.lemmas++;

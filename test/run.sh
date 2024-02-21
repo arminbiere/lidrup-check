@@ -18,6 +18,7 @@ passed=0
 run () {
   case $files$2 in
     1litnotincore) return;;
+    2twice) return;;
   esac
   expected=$1
   shift
@@ -78,6 +79,7 @@ run 0 regr2
 run 0 cnt2re
 
 run 1 litnotincore
+run 1 twice
 
 files="`expr $files + 1`"
 

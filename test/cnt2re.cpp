@@ -16,9 +16,9 @@ static void start () {
   icnf = fopen (NAME ".icnf", "w");
   fprintf (icnf, "p icnf\n");
   solver = new CaDiCaL::Solver ();
-  solver->set ("idrup", 1);
+  solver->set ("lidrup", 1);
   solver->set ("binary", 0);
-  solver->trace_proof (NAME ".idrup");
+  solver->trace_proof (NAME ".lidrup");
   printf ("c start bounded model checking\n"), fflush (stdout);
 }
 

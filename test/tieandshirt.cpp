@@ -4,9 +4,9 @@
 
 int main () {
   CaDiCaL::Solver solver;
-  solver.set ("idrup", 1);
+  solver.set ("lidrup", 1);
   solver.set ("binary", 0);
-  solver.trace_proof ("tieandshirt.idrup");
+  solver.trace_proof ("tieandshirt.lidrup");
   // tie = 1, shirt = 2;
   solver.clause (1, 2);   // tie | shirt
   solver.clause (-1, 2);  // tier -> shirt

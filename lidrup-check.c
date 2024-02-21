@@ -947,7 +947,6 @@ static int next_line_without_printing (char default_type) {
 
     assert (!line.id);
 
-    ch = next_char ();
     if (!ISDIGIT (ch))
       parse_error ("expected clause identifier");
     if (ch == '0')
@@ -971,6 +970,8 @@ static int next_line_without_printing (char default_type) {
 
     assert (id);
     line.id = id;
+
+    ch = next_char ();
   }
 
   if (actual_type == 'i' || actual_type == 'l' || actual_type == 'q' ||

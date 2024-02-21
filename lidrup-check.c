@@ -5,13 +5,14 @@ static const char * lidrup_check_usage =
 "\n"
 "where '<option>' is one of the following options:\n"
 "\n"
-"  -h | --help     print command line option summary\n"
-"  -q | --quiet    do not print any message beside errors\n"
-"  -v | --verbose  print more verbose message too\n"
-#ifndef NDEBUG
-"  -l | --logging  enable very verbose logging\n"
-#endif
-"  --version       print version and exit\n"
+"  -h | --help      print command line option summary\n"
+#ifndef NDEBUG     
+"  -l | --logging   enable very verbose logging\n"
+#endif             
+"  -n | --no-reuse  do not reuse clause identifiers\n"
+"  -q | --quiet     do not print any message beside errors\n"
+"  -v | --verbose   print more verbose message too\n"
+"  --version        print version and exit\n"
 "\n"
 
 "If two files are specified the first '<icnf>' is an incremental CNF file\n"
@@ -152,6 +153,7 @@ struct bit_table {
 
 static int verbosity;     // -1=quiet, 0=default, 1=verbose, INT_MAX=logging
 static int mode = strict; // Default 'strict not 'relaxed' nor 'pedantic'.
+static bool no_reuse;     // Do not allow to reuse clause IDs.
 
 /*------------------------------------------------------------------------*/
 
@@ -1369,7 +1371,9 @@ static struct clause *find_clause (struct hash_table *hash_table,
   size_t start = reduce_hash (id, size), pos = start;
   for (;;) {
     struct clause *res = table[pos];
-    if (!res || (res != REMOVED && res->id == id))
+    if (!res)
+      return res;
+    if (res != REMOVED && res->id == id)
       return res;
     if (++pos == size)
       pos = 0;
@@ -1721,13 +1725,23 @@ IMPLICATION_CHECK_SUCCEEDED:
 
 // This section has all the low-level checks.
 
-static void check_clause_id_unused (int type) {
+static void check_unused (int type) {
   assert (line.id);
-  if (contains_bit (&used, line.id))
-    line_error (type, "clause identifier %" PRId64 " already in use",
-                line.id);
-  else
+  if (no_reuse) {
+    if (contains_bit (&used, line.id))
+      line_error (type, "clause identifier %" PRId64 " already used",
+                  line.id);
     insert_bit (&used, line.id);
+    debug ("clause identifier %" PRId64 " was never used", line.id);
+  } else {
+    if (find_clause (&active, line.id))
+      line_error (type, "clause identifier %" PRId64 " actively in use",
+                  line.id);
+    if (find_clause (&inactive, line.id))
+      line_error (type, "clause identifier %" PRId64 " inactive but in use",
+                  line.id);
+    debug ("clause identifier %" PRId64 " was never used", line.id);
+  }
 }
 
 static void delete_clause (struct clause *c) {
@@ -1906,7 +1920,7 @@ static void conclude_query (int res) {
 // Merged checking options for each line.
 
 static void add_input_clause (int type) {
-  check_clause_id_unused (type);
+  check_unused (type);
   struct clause *c = add_clause (true);
   insert_clause (&active, c);
   statistics.inputs++;
@@ -1914,7 +1928,7 @@ static void add_input_clause (int type) {
 }
 
 static void check_then_add_lemma (int type) {
-  check_clause_id_unused (type);
+  check_unused (type);
   struct clause *c = add_clause (false);
   insert_clause (&active, c);
   statistics.lemmas++;
@@ -2048,12 +2062,12 @@ static void check_saved_failed_literals_match_core (int type) {
     marks[lit] = true;
   for (all_elements (int, lit, saved))
     if (marks[-lit])
-      check_error (
-          "literal '%d' in this unsatisfiable core 'u' line of the proof "
-          "is claimed not to be a failed literal "
-          "in the 'f' line %zu of the interaction file '%s' "
-          "(as it occurs negated as '%d' there)",
-          -lit, start_of_saved, interactions->name, lit);
+      check_error ("literal '%d' in this unsatisfiable core 'u' line "
+                   "of the proof "
+                   "is claimed not to be a failed literal "
+                   "in the 'f' line %zu of the interaction file '%s' "
+                   "(as it occurs negated as '%d' there)",
+                   -lit, start_of_saved, interactions->name, lit);
   unmark_line ();
   for (all_elements (int, lit, line.lits))
     marks[lit] = false;
@@ -2144,45 +2158,46 @@ static void debug_state (const char *name) {
 
 // The checker state machine implemented here should match the graphs in
 // the dot files and the corresponding PDF files.  They come in three
-// variants: 'strict' (the default), 'pedantic' and 'relaxed'.  Currently
+// variants: 'strict' (the default), 'pedantic' and 'relaxed'. Currently
 // not all features of 'strict' are implemented yet (we still require as
 // in 'pedantic' mode that the interaction file is required to conclude
-// with 'm', 'v', 'u' or 'f' after an 's' status line but the headers can
-// be dropped). Nor are any of the 'relaxed' features working.  The next
-// two comment paragraphs are therefore only here for future reference.
+// with 'm', 'v', 'u' or 'f' after an 's' status line but the headers
+// can be dropped). Nor are any of the 'relaxed' features working.  The
+// next two comment paragraphs are therefore only here for future
+// reference.
 
 static int parse_and_check_icnf_and_idrup (void) {
 
   // TODO Redundant at this point (see above).
 
   // By default any parse error or failed check will abort the program
-  // with exit code '1' except in 'relaxed' parsing mode where parsing and
-  // checking continues if in the proof a model 'm' line is missing after
-  // a 's SATISFIABLE' status line. Without having such a model the
-  // checker can not guarantee the input clauses to be satisfied at this
-  // point.
+  // with exit code '1' except in 'relaxed' parsing mode where parsing
+  // and checking continues if in the proof a model 'm' line is missing
+  // after a 's SATISFIABLE' status line. Without having such a model
+  // the checker can not guarantee the input clauses to be satisfied at
+  // this point.
 
   // TODO Redundant at this point (see above).
 
   // For missing 'u' proof conclusion lines the checker might end up in
   // a similar situation (in case the user claims an unsatisfiable core
   // which is not implied by unit propagation).  In these cases the
-  // program continues without error but simply exit with exit code '2' to
-  // denote that checking only partially.
+  // program continues without error but simply exit with exit code '2'
+  // to denote that checking only partially.
 
   int res = 0; // The exit code of the program without error.
 
   message ("interaction and proof checking in %s mode", mode_string ());
   goto INTERACTION_HEADER; // Explicitly start with this state.
 
-  // In order to build a clean state-machine the basic block of each state
-  // should always be left with a 'goto'.  To ease code reviewing we even
-  // want to enforce this rule for unreachable code after error message
-  // (which abort the program) by adding a 'goto UNREACHABLE' after those
-  // error messages and further have a 'goto UNREACHABLE' implicitly
-  // before each 'state' label.  The 'UNREACHABLE' state should not be
-  // reachable and if in a corner cases it still is prints a fatal error
-  // message.
+  // In order to build a clean state-machine the basic block of each
+  // state should always be left with a 'goto'.  To ease code reviewing
+  // we even want to enforce this rule for unreachable code after error
+  // message (which abort the program) by adding a 'goto UNREACHABLE'
+  // after those error messages and further have a 'goto UNREACHABLE'
+  // implicitly before each 'state' label.  The 'UNREACHABLE' state
+  // should not be reachable and if in a corner cases it still is prints
+  // a fatal error message.
 
   {
     STATE (INTERACTION_HEADER);
@@ -2419,9 +2434,10 @@ static int parse_and_check_icnf_and_idrup (void) {
 
 /*------------------------------------------------------------------------*/
 
-// This is the version of the parser and checker when only the '<lidrup>'
-// file is given. It is much simpler but otherwise works the same way as
-// 'parse_and_check_icnf_and_idrup' which checks the interactions in the
+// This is the version of the parser and checker when only the
+// '<lidrup>' file is given. It is much simpler but otherwise works the
+// same way as 'parse_and_check_icnf_and_idrup' which checks the
+// interactions in the
 // '<icnf>' file against the proof lines in '<lidrup>'.
 
 static int parse_and_check_idrup (void) {
@@ -2530,14 +2546,14 @@ static int parse_and_check_idrup (void) {
 
 /*------------------------------------------------------------------------*/
 
-// Memory leaks could be a show-stopper for large proofs.  To find memory
-// leaks reclaiming all memory before successfully exiting the checker is
-// thus not only good style.  Reclaiming all memory combined with memory
-// checkers, e.g., 'configure -a' to compile with ASAN, allows to check
-// for memory leaks.  For the linear clause checker we use two hash tables
-// to map clause identifiers to clauses, one for active and one for
-// inactive clauses.  We traverse those hash tables to properly reclaim
-// clauses.
+// Memory leaks could be a show-stopper for large proofs.  To find
+// memory leaks reclaiming all memory before successfully exiting the
+// checker is thus not only good style.  Reclaiming all memory combined
+// with memory checkers, e.g., 'configure -a' to compile with ASAN,
+// allows to check for memory leaks.  For the linear clause checker we
+// use two hash tables to map clause identifiers to clauses, one for
+// active and one for inactive clauses.  We traverse those hash tables
+// to properly reclaim clauses.
 
 static void release_clauses_in_hash_table (struct hash_table *hash_table) {
   struct clause **table = hash_table->table;
@@ -2572,6 +2588,8 @@ static void release (void) {
   release_active_clauses ();
   release_inactive_clauses ();
   release_input_clauses ();
+  if (no_reuse && used.words)
+    free (used.words);
   free (active.table);
   free (inactive.table);
   free (trail.begin);
@@ -2695,6 +2713,8 @@ int main (int argc, char **argv) {
       exit (0);
     } else if (!strcmp (arg, "-q") || !strcmp (arg, "--quiet"))
       verbosity = -1;
+    else if (!strcmp (arg, "-n") || !strcmp (arg, "--no-reuse"))
+      no_reuse = true;
     else if (!strcmp (arg, "-v") || !strcmp (arg, "--verbose"))
       verbosity += (verbosity < INT_MAX);
     else if (!strcmp (arg, "-l") || !strcmp (arg, "--logging"))

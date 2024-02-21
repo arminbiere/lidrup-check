@@ -468,7 +468,8 @@ static void check_error (const char *fmt, ...) {
 static bool type_has_id (int t) { return t == 'i' || t == 'l'; }
 
 static bool type_has_lits (int t) {
-  return t == 'i' || t == 'l' || t == 'q' || t == 'm' || t == 'u';
+  return t == 'i' || t == 'l' || t == 'q' || t == 'm' || t == 'u' ||
+         t == 'v';
 }
 
 static bool type_has_ids (int t) {

@@ -537,7 +537,7 @@ static void debug_print_parsed_line (int type) {
     break;
   default:
     fputc (type, stdout);
-    for (const int *p = line.begin; p != line.end; p++)
+    for (const int *p = line.lits.begin; p != line.lits.end; p++)
       printf (" %d", *p);
     fputs (" 0", stdout);
     break;
@@ -937,9 +937,6 @@ static int next_line_without_printing (char default_type) {
       goto INVALID_STATUS_LINE;
     return 's';
   }
-
-  if (parsed_type && (ch != ' '))
-    parse_error ("expected space after '%c'", parsed_type);
 
   if (actual_type == 'i' || actual_type == 'l') {
 
@@ -2715,7 +2712,7 @@ int main (int argc, char **argv) {
       if (!i)
         fputs ("c\n", stdout);
       message ("closing '%s' after reading %zu lines (%zu bytes)",
-               files[i].name, files[i].lineno, files[i].charno);
+               files[i].name, files[i].lineno-1, files[i].charno);
     }
     fclose (files[i].file);
   }

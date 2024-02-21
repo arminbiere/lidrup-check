@@ -110,6 +110,7 @@ struct file {
   const char *name;      // Actual path to this file.
   size_t lines;          // Proof lines read from this file.
   size_t lineno;         // Line number of lines parsed so far.
+  size_t colno;          // Number of characters parsed in the line.
   size_t charno;         // Number of bytes parsed.
   size_t start_of_line;  // Line number of current proof line.
   bool end_of_file;      // Buffer 'read-char' detected end-of-file.
@@ -436,8 +437,9 @@ static void parse_error (const char *, ...)
 
 static void parse_error (const char *fmt, ...) {
   assert (file);
-  fprintf (stderr, "lidrup-check: parse error: at line %zu in '%s': ",
-           file->start_of_line, file->name);
+  fprintf (stderr,
+           "lidrup-check: parse error: at line %zu column %zu in '%s': ",
+           file->start_of_line, file->colno, file->name);
   va_list ap;
   va_start (ap, fmt);
   vfprintf (stderr, fmt, ap);
@@ -806,8 +808,10 @@ static int next_char (void) {
   if (file->last_char == '\n')
     file->lineno++;
   file->last_char = res;
-  if (res != EOF)
+  if (res != EOF) {
     file->charno++;
+    file->colno++;
+  }
   return res;
 }
 
@@ -818,6 +822,7 @@ static int next_line_without_printing (char default_type) {
   int ch;
 
   for (;;) {
+    file->colno = 0;
     ch = next_char ();
     file->start_of_line = file->lineno;
     if (ch == 'c') {
@@ -2712,7 +2717,7 @@ int main (int argc, char **argv) {
       if (!i)
         fputs ("c\n", stdout);
       message ("closing '%s' after reading %zu lines (%zu bytes)",
-               files[i].name, files[i].lineno-1, files[i].charno);
+               files[i].name, files[i].lineno - 1, files[i].charno);
     }
     fclose (files[i].file);
   }

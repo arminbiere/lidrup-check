@@ -1,4 +1,4 @@
-digraph "idrup-check" {
+digraph "lidrup-check" {
 
   INTERACTION_HEADER [shape=box];
   INTERACTION_HEADER -> PROOF_HEADER [label=" p icnf"];
@@ -6,13 +6,13 @@ digraph "idrup-check" {
   empty_legend1 [label="                     ",style=invis]
   icnf_legend
   [shape=box,color=darkgray,fontcolor=darkgray,style=dashed,label="reading from ICNF interaction file"]
-  idrup_legend
-  [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from IDRUP/LIDRUP proof file"]
+  lidrup_legend
+  [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from LIDRUP proof file"]
 
   "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
    "end-of-checking" -> INTERACTION_INPUT [label="  $    ",dir=back,fontcolor=darkgray,color=darkgray];
 
-  PROOF_HEADER -> INTERACTION_INPUT [label=" p idrup"]
+  PROOF_HEADER -> INTERACTION_INPUT [label=" p lidrup"]
 
   INTERACTION_INPUT [shape=box];
   INTERACTION_INPUT -> PROOF_INPUT [label=" i "];

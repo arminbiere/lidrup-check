@@ -1,6 +1,6 @@
-digraph "idrup-check" {
+digraph "lidrup-check" {
 
-  PROOF_HEADER -> PROOF_INPUT [label=" p idrup"]
+  PROOF_HEADER -> PROOF_INPUT [label=" p lidrup"]
 
   "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
    "end-of-checking" -> PROOF_INPUT [label="  $    ",dir=back,fontcolor=darkgray,color=darkgray];

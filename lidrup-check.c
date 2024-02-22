@@ -149,6 +149,11 @@ struct bit_table {
 
 /*------------------------------------------------------------------------*/
 
+#define REMOVED ((struct clause *) ((uintptr_t) 1))
+#define VALID(C) ((C) && (C) != REMOVED)
+
+/*------------------------------------------------------------------------*/
+
 // Global command line run-time options.
 
 static int verbosity;     // -1=quiet, 0=default, 1=verbose, INT_MAX=logging
@@ -523,7 +528,7 @@ static void debug (const char *, ...)
 static void debug (const char *fmt, ...) {
   if (verbosity != INT_MAX)
     return;
-  printf ("c DEBUG %u ", level);
+  fputs ("c DEBUG ", stdout);
   va_list ap;
   va_start (ap, fmt);
   vprintf (fmt, ap);
@@ -536,8 +541,7 @@ static void debug_print_parsed_line (int type) {
   if (verbosity < INT_MAX)
     return;
   assert (file);
-  printf ("c DEBUG %u parsed line %zu in '%s': ", level, file->lineno,
-          file->name);
+  printf ("c DEBUG parsed line %zu in '%s': ", file->lineno, file->name);
   if (!type)
     fputs ("<end-of-file>", stdout);
   else if (type == 'p' || type == 's')
@@ -572,8 +576,7 @@ static const char *debug_literal (int lit) {
   char *res = next_debug_buffer ();
   int value = values[lit];
   if (value)
-    snprintf (res, debug_buffer_line_size, "%d@%u=%d", lit,
-              levels[abs (lit)], value);
+    snprintf (res, debug_buffer_line_size, "%d=%d", lit, value);
   else
     snprintf (res, debug_buffer_line_size, "%d", lit);
   return res;
@@ -585,7 +588,7 @@ static void debug_clause (struct clause *, const char *, ...)
 static void debug_clause (struct clause *c, const char *fmt, ...) {
   if (verbosity < INT_MAX)
     return;
-  printf ("c DEBUG %u ", level);
+  fputs ("c DEBUG ", stdout);
   va_list ap;
   va_start (ap, fmt);
   vprintf (fmt, ap);
@@ -1228,9 +1231,6 @@ static void free_clause (struct clause *c) {
 
 // Hash table insertion of clauses based on their ID.
 
-#define REMOVED ((struct clause *) ((uintptr_t) 1))
-#define VALID(C) ((C) && (C) != REMOVED)
-
 #ifndef NDEBUG
 
 static bool is_power_of_two (size_t n) { return n && !(n & (n - 1)); }
@@ -1471,9 +1471,11 @@ static void check_implied (int type, const char *type_str, int sign) {
       else
         line_error (type, "could not find antecedent %" PRId64, id);
     }
-
-    line_error (type, "%s implication check failed:", type_str);
+    statistics.resolutions++;
+    debug_clause (c, "resolving");
   }
+
+  line_error (type, "%s implication check failed:", type_str);
 
   // IMPLICATION_CHECK_SUCCEEDED:
 
@@ -1526,7 +1528,6 @@ static void weaken_clause (struct clause *c) {
 }
 
 static void restore_clause (struct clause *c) {
-  assert (!level);
   assert (c->weakened);
   debug_clause (c, "restoring");
   remove_clause (&inactive, c);
@@ -1833,7 +1834,6 @@ static void conclude_satisfiable_query_with_model (int type) {
     check_line_consistent_with_saved (type);
   statistics.conclusions++;
   statistics.models++;
-  assert (!level);
   debug ("satisfiable query concluded");
   conclude_query (10);
 }
@@ -1852,7 +1852,6 @@ static void conclude_unsatisfiable_query_with_core (int type) {
   }
   statistics.conclusions++;
   statistics.cores++;
-  assert (!level || inconsistent);
   debug ("unsatisfiable query concluded");
   (void) type;
   conclude_query (20);
@@ -1879,7 +1878,7 @@ static const char *mode_string (void) {
 static void debug_state (const char *name) {
   if (verbosity < INT_MAX)
     return;
-  size_t printed = printf ("c DEBUG %u ----[ %s ]", level, name);
+  size_t printed = printf ("c DEBUG ----[ %s ]", name);
   while (printed++ != 73)
     fputc ('-', stdout);
   fputc ('\n', stdout);

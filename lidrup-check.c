@@ -1085,7 +1085,16 @@ static void unexpected_line (int type, const char *expected) {
 
 /*------------------------------------------------------------------------*/
 
-// Update trail and control stack including the decision level.
+// Assigning a single variable and backtracking / unassigning all.
+
+static void assign (int lit) {
+  assert (!values[lit]);
+  assert (!values[-lit]);
+  *trail.end++ = lit;
+  values[-lit] = -1;
+  values[lit] = 1;
+  debug ("assign %s", debug_literal (lit));
+}
 
 static void backtrack (void) {
   for (all_elements (int, lit, trail)) {
@@ -1095,19 +1104,6 @@ static void backtrack (void) {
     values[lit] = values[-lit] = 0;
   }
   trail.end = trail.begin;
-}
-
-/*------------------------------------------------------------------------*/
-
-// Assigning a variable.
-
-static void assign (int lit) {
-  assert (!values[lit]);
-  assert (!values[-lit]);
-  *trail.end++ = lit;
-  values[-lit] = -1;
-  values[lit] = 1;
-  debug ("assign %s", debug_literal (lit));
 }
 
 /*------------------------------------------------------------------------*/
@@ -1456,10 +1452,28 @@ static void check_implied (int type, const char *type_str, int sign) {
   }
 
   statistics.checks++;
+#ifndef NDEBUG
+  if (sign < 0)
+    debug ("checking unsatisfiable core justified");
+  else
+    debug ("checking lemma is justified");
+#endif
 
-  debug ("assigning first all line literals");
-  for (all_elements (int, lit, line.lits))
-    assign (-sign * lit);
+  debug ("assigning first all literals");
+  for (all_elements (int, lit, line.lits)) {
+    int signed_lit = sign * lit;
+    signed char value = values[signed_lit];
+    if (value < 0) {
+      debug ("skipping duplicated literal %s", debug_literal (signed_lit));
+      continue;
+    }
+    if (value > 0) {
+      debug ("found tautological literal %s and %s",
+             debug_literal (-signed_lit), debug_literal (signed_lit));
+      goto IMPLICATION_CHECK_SUCCEEDED;
+    }
+    assign (-signed_lit);
+  }
 
   for (all_elements (int64_t, id, line.ids)) {
     if (id < 0)
@@ -1473,15 +1487,31 @@ static void check_implied (int type, const char *type_str, int sign) {
     }
     statistics.resolutions++;
     debug_clause (c, "resolving");
+    int unit = 0;
+    for (all_literals (lit, c)) {
+      signed char value = values[lit];
+      if (value < 0)
+        continue;
+      if (unit && unit != lit)
+        line_error (type, "antecedent %" PRId64 " not resolvable",
+                    id);
+      unit = lit;
+      if (!value)
+        assign (lit);
+    }
+    if (!unit) {
+      debug_clause (c, "justifying conflicting");
+      goto IMPLICATION_CHECK_SUCCEEDED;
+    }
   }
 
-  line_error (type, "%s implication check failed:", type_str);
+  line_error (type, "%s resolution check failed:", type_str);
 
-  // IMPLICATION_CHECK_SUCCEEDED:
+IMPLICATION_CHECK_SUCCEEDED:
 
   backtrack ();
 
-  debug ("%s implication check succeeded", type_str);
+  debug ("%s resolution check succeeded", type_str);
   (void) type_str;
 }
 
@@ -1604,7 +1634,7 @@ static void check_line_satisfies_input_clauses (int type) {
 
 static void check_line_propagation_yields_conflict (int type) {
   debug ("checking unsatisfiable core implied");
-  check_implied (type, "unsatisfiable core", 1);
+  check_implied (type, "unsatisfiable core", -1);
   debug ("unsatisfiable core implied");
 }
 
@@ -1671,6 +1701,7 @@ static void add_input_clause (int type) {
 
 static void check_then_add_lemma (int type) {
   check_unused (type);
+  check_implied (type, "lemma", 1);
   struct clause *c = allocate_clause (false);
   insert_clause (&active, c);
   statistics.lemmas++;

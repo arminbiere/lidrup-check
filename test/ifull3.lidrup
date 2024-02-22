@@ -5,7 +5,7 @@ i 3 -1 2 -3 0
 i 4 -1 2 3 0
 q 3 0
 l 9 -1 2 0 3 4 0
-l 10 -1 0 1 2 9 0
+l 10 -1 0 9 1 2 0
 s SATISFIABLE
 m -1 2 3 0
 i 5 1 2 -3 0
@@ -20,6 +20,6 @@ s SATISFIABLE
 m -1 2 -3 0
 i 8 1 -2 3 0
 q 0
-l 12 1 0 7 8 11 0
+l 12 1 0 11 7 8 0
 s UNSATISFIABLE
 u 0 10 12 0

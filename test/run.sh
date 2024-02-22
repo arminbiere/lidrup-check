@@ -18,12 +18,10 @@ passed=0
 run () {
   case $files$2 in
     1litnotincore) return;;
-    2twice) return;;
-    2weaken) return;;
   esac
   expected=$1
   shift
-  base="$1"
+  base=$1
   icnf=test/$base.icnf
   proof=test/$base.lidrup
   log=test/$base.log
@@ -32,6 +30,7 @@ run () {
   then
     cmd="./$binary $proof"
   else
+    test -f $icnf || return
     cmd="./$binary $icnf $proof"
   fi
   printf "%s" "$cmd"
@@ -82,6 +81,9 @@ run 0 cnt2re
 
 run 1 litnotincore
 run 1 twice
+run 1 invalidempty
+run 1 invalidfull2
+run 1 invalideleted
 
 files="`expr $files + 1`"
 

@@ -1719,8 +1719,8 @@ static void find_then_restore_clauses (int type) {
     find_then_restore_clause (type, id);
 }
 
-static bool is_learn_delete_restore_or_weaken (int type) {
-  return type == 'l' || type == 'd' || type == 'r' || type == 'w';
+static bool is_input_learn_delete_restore_or_weaken (int type) {
+  return type == 'i' || type == 'l' || type == 'd' || type == 'r' || type == 'w';
 }
 
 static void learn_delete_restore_or_weaken (int type) {
@@ -1730,6 +1730,8 @@ static void learn_delete_restore_or_weaken (int type) {
     find_then_delete_clauses (type);
   else if (type == 'r')
     find_then_restore_clauses (type);
+  else if (type == 'i')
+    add_input_clause (type);
   else {
     assert (type == 'w');
     find_then_weaken_clauses (type);
@@ -2007,7 +2009,7 @@ static int parse_and_check_icnf_and_idrup (void) {
         goto PROOF_INPUT;
       else
         goto PROOF_INPUT_UNEXPECTED_LINE;
-    } else if (!is_learn_delete_restore_or_weaken (type)) {
+    } else if (!is_input_learn_delete_restore_or_weaken (type)) {
     PROOF_INPUT_UNEXPECTED_LINE:
       unexpected_line (type, "'i', 'l', 'd', 'w' or 'r'");
       goto UNREACHABLE;
@@ -2028,7 +2030,7 @@ static int parse_and_check_icnf_and_idrup (void) {
         goto PROOF_QUERY;
       else
         goto PROOF_QUERY_UNEXPECTED_LINE;
-    } else if (!is_learn_delete_restore_or_weaken (type)) {
+    } else if (!is_input_learn_delete_restore_or_weaken (type)) {
     PROOF_QUERY_UNEXPECTED_LINE:
       unexpected_line (type, "'q', 'l', 'd', 'w' or 'r'");
       goto UNREACHABLE;
@@ -2041,7 +2043,7 @@ static int parse_and_check_icnf_and_idrup (void) {
     STATE (PROOF_CHECK);
     set_file (proof);
     int type = next_line ('l');
-    if (is_learn_delete_restore_or_weaken (type)) {
+    if (is_input_learn_delete_restore_or_weaken (type)) {
       learn_delete_restore_or_weaken (type);
       goto PROOF_CHECK;
     } else if (type != 's') {
@@ -2220,7 +2222,7 @@ static int parse_and_check_idrup (void) {
       goto PROOF_CHECK;
     } else if (type == 0)
       goto END_OF_CHECKING;
-    else if (!is_learn_delete_restore_or_weaken (type)) {
+    else if (!is_input_learn_delete_restore_or_weaken (type)) {
     PROOF_INPUT_UNEXPECTED_LINE:
       unexpected_line (type, "'q', 'i', 'l', 'd', 'w' or 'r'");
       goto UNREACHABLE;
@@ -2232,7 +2234,7 @@ static int parse_and_check_idrup (void) {
   {
     STATE (PROOF_CHECK);
     int type = next_line ('l');
-    if (is_learn_delete_restore_or_weaken (type)) {
+    if (is_input_learn_delete_restore_or_weaken (type)) {
       learn_delete_restore_or_weaken (type);
       goto PROOF_CHECK;
     } else if (type != 's') {

@@ -501,7 +501,7 @@ static void line_error (int type, const char *fmt, ...) {
   fputc (type, stderr);
   if (type_has_id (type)) {
     assert (line.id > 0);
-    printf (" %" PRId64, line.id);
+    fprintf (stderr, " %" PRId64, line.id);
   } else
     assert (!line.id);
   if (type_has_lits (type)) {

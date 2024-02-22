@@ -12,15 +12,16 @@ digraph "idrup-check" {
   INTERACTION_INPUT -> PROOF_QUERY [label=" q ",color=orange3,fontsize=20,fontcolor=orange3];
 
   PROOF_INPUT -> INTERACTION_INPUT [label=" i "];
-  PROOF_INPUT -> PROOF_INPUT [label=" l | d | r | w "];
+  PROOF_INPUT:sw -> PROOF_INPUT [label=" l | d | r | w "];
 
   PROOF_QUERY -> PROOF_CHECK [label=" q "];
   PROOF_QUERY -> PROOF_QUERY [label=" l | d | r | w "];
 
   PROOF_CHECK [fontsize=20];
-  PROOF_CHECK -> PROOF_CHECK [label=" l | d | r | w ",dir=back,fontsize=20];
+  PROOF_CHECK:_ -> PROOF_CHECK:ne [label=" l | d | r | w ",dir=back];
   PROOF_CHECK -> INTERACTION_SATISFIABLE [label=" s SATISFIABLE "];
   PROOF_CHECK -> INTERACTION_UNSATISFIABLE [label=" s UNSATISFIABLE "];
+  PROOF_CHECK -> INTERACTION_PROPAGATE [label=" i "];
   PROOF_CHECK -> INTERACTION_UNKNOWN [label=" s UNKNNOWN "];
 
   INTERACTION_UNSATISFIABLE [shape="box",label="INTERACTION_UNSATISFIABLE?"];
@@ -28,6 +29,9 @@ digraph "idrup-check" {
 
   INTERACTION_SATISFIABLE [shape="box",label="INTERACTION_SATISFIABLE?"];
   INTERACTION_SATISFIABLE -> INTERACTION_SATISFIED [label=" s SATISFIABLE "];
+
+  PROOF_QUERY_OR_MODEL -> PROOF_QUERY [label=" m ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
+  PROOF_QUERY_OR_MODEL -> PROOF_CHECK [label=" q ",color=red,fontcolor=red];
 
   INTERACTION_SATISFIED [shape=box,label="INTERACTION_SATISFIED!"];
   INTERACTION_SATISFIED -> PROOF_MODEL [label=" v | m "];
@@ -42,7 +46,11 @@ digraph "idrup-check" {
   INTERACTION_UNSATISFIED -> PROOF_CORE_AND_END [label=" $ "];
 
   INTERACTION_UNKNOWN [shape=box];
-  INTERACTION_UNKNOWN -> INTERACTION_INPUT [label="s UNKNOWN",weight=2];
+  INTERACTION_UNKNOWN -> INTERACTION_INPUT [label="s UNKNOWN"];
+
+  INTERACTION_PROPAGATE [shape=box];
+  INTERACTION_PROPAGATE -> PROOF_CHECK [label=" i "];
+  INTERACTION_PROPAGATE -> INTERACTION_PROPAGATE [label=" l | d | r | w "];
 
   PROOF_MODEL_AND_END -> "end-of-checking" [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
   PROOF_CORE_AND_END -> "end-of-checking" [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
@@ -52,9 +60,6 @@ digraph "idrup-check" {
 
   PROOF_INPUT_OR_MODEL -> INTERACTION_INPUT [label=" i ",color=red,fontcolor=red];
   PROOF_INPUT_OR_MODEL -> PROOF_INPUT [label=" m ", color=darkgreen,fontcolor=darkgreen,fontsize=20];
-
-  PROOF_QUERY_OR_MODEL -> PROOF_QUERY [label=" m ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
-  PROOF_QUERY_OR_MODEL -> PROOF_CHECK [label=" q ",color=red,fontcolor=red];
 
   PROOF_QUERY_OR_CORE -> PROOF_QUERY [label=" u ",color=darkgreen,fontcolor=darkgreen,fontsize=20];
   PROOF_QUERY_OR_CORE -> PROOF_CHECK [label=" q ",color=red,fontcolor=red];

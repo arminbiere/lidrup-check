@@ -6,7 +6,6 @@ digraph "idrup-check" {
   empty_legend1 [label="                     ",style=invis]
   icnf_legend
   [shape=box,color=darkgray,fontcolor=darkgray,style=dashed,label="reading from ICNF interaction file"]
-  //empty_legend2 [label="      ",style=invis]
   idrup_legend
   [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from IDRUP proof file"]
 
@@ -26,10 +25,15 @@ digraph "idrup-check" {
   PROOF_QUERY -> PROOF_QUERY [label=" l | d | r | w"];
 
   PROOF_CHECK [fontsize=20];
-  PROOF_CHECK -> PROOF_CHECK [label=" l | d | r | w ",dir=back,fontsize=20];
+  PROOF_CHECK:_ -> PROOF_CHECK:ne [label=" l | d | r | w ",dir=back];
+  PROOF_CHECK -> INTERACTION_PROPAGATE [label=" i "];
   PROOF_CHECK -> INTERACTION_SATISFIABLE [label=" s SATISFIABLE "];
   PROOF_CHECK -> INTERACTION_UNSATISFIABLE [label=" s UNSATISFIABLE "];
   PROOF_CHECK -> INTERACTION_UNKNOWN [label=" s UNKNOWN ",weight=2];
+
+  INTERACTION_PROPAGATE [shape="box"];
+  INTERACTION_PROPAGATE -> PROOF_CHECK [label=" i "];
+  INTERACTION_PROPAGATE -> INTERACTION_PROPAGATE [label=" l | d | r | w "];
 
   INTERACTION_UNSATISFIABLE [shape="box",label="INTERACTION_UNSATISFIABLE?"];
   INTERACTION_UNSATISFIABLE -> INTERACTION_UNSATISFIED [label=" s UNSATISFIABLE "];

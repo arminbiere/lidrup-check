@@ -1322,11 +1322,18 @@ static void free_clause (struct clause *c) {
 
 // Hash table insertion of clauses based on their ID.
 
-#define REMOVED ((struct clause *) (~(uintptr_t) 1))
+#define REMOVED ((struct clause *) ((uintptr_t) 1))
+#define VALID(C) ((C) && (C) != REMOVED)
 
 #ifndef NDEBUG
+
 static bool is_power_of_two (size_t n) { return n && !(n & (n - 1)); }
+
 #endif
+
+static const char *hash_table_name (struct hash_table *hash_table) {
+  return hash_table == &active ? "active" : "inactive";
+}
 
 static size_t reduce_hash (int64_t id, size_t size) {
   assert (id > 0);
@@ -1334,16 +1341,25 @@ static size_t reduce_hash (int64_t id, size_t size) {
   return ((size_t) id) & (size - 1);
 }
 
-static size_t enlarge_hash_table (struct hash_table *hash_table) {
+static void enlarge_hash_table (struct hash_table *hash_table) {
   size_t old_size = hash_table->size;
   size_t old_count = hash_table->count;
   struct clause **old_table = hash_table->table;
   size_t new_size = old_size ? 2 * old_size : 1;
+  debug ("enlarging %s clause hash table to %zu",
+         hash_table_name (hash_table), new_size);
   struct clause **new_table = calloc (new_size, sizeof *new_table);
   if (!new_table)
-    out_of_memory ("enlarging hash table of size %zu", old_size);
+    out_of_memory ("enlarging %s clause hash table of size %zu",
+                   hash_table_name (hash_table), old_size);
   size_t removed = 0;
   struct clause **const end_of_old_table = old_table + old_size;
+#ifndef NDEBUG
+  size_t old_clauses = 0;
+  for (struct clause **p = old_table; p != end_of_old_table; p++)
+    if (VALID (*p))
+      old_clauses++;
+#endif
   for (struct clause **p = old_table; p != end_of_old_table; p++) {
     struct clause *c = *p;
     if (!c)
@@ -1362,53 +1378,86 @@ static size_t enlarge_hash_table (struct hash_table *hash_table) {
   hash_table->count = new_count;
   hash_table->size = new_size;
   hash_table->table = new_table;
+#ifndef NDEBUG
+  size_t new_clauses = 0;
+  struct clause **const end_of_new_table = new_table + new_size;
+  for (struct clause **p = new_table; p != end_of_new_table; p++)
+    if (VALID (*p))
+      new_clauses++;
+  assert (old_clauses == new_clauses);
+  assert (new_count == new_clauses);
+#endif
   free (old_table);
-  return new_size;
 }
 
 static struct clause *find_clause (struct hash_table *hash_table,
                                    int64_t id) {
   size_t size = hash_table->size;
-  if (!size)
-    return 0;
-  struct clause **table = hash_table->table;
-  size_t start = reduce_hash (id, size), pos = start;
-  for (;;) {
-    struct clause *res = table[pos];
-    if (!res)
-      return res;
-    if (res != REMOVED && res->id == id)
-      return res;
-    if (++pos == size)
-      pos = 0;
-    if (pos == start)
-      return 0;
+  struct clause *res = 0;
+  if (size) {
+    struct clause **table = hash_table->table;
+    size_t start = reduce_hash (id, size), pos = start;
+    for (;;) {
+      res = table[pos];
+      if (!res)
+        break;
+      if (res != REMOVED && res->id == id)
+        break;
+      if (++pos == size)
+        pos = 0;
+      if (pos == start) {
+        res = 0;
+        break;
+      }
+    }
   }
+#ifndef NDEBUG
+  if (res)
+    debug_clause (res, "found in %s clause hash table",
+                  hash_table_name (hash_table));
+  else
+    debug ("could not find clause with identifier %" PRId64
+           " in %s clause hash table",
+           line.id, hash_table_name (hash_table));
+#endif
+  return res;
+}
+
+static bool is_full_hash_table (struct hash_table *hash_table) {
+  size_t size = hash_table->size;
+  size_t count = hash_table->count;
+  return 2 * count >= size;
 }
 
 static void insert_clause (struct hash_table *hash_table,
                            struct clause *c) {
+  debug_clause (c, "inserting in %s clause hash table",
+                hash_table_name (hash_table));
+  if (is_full_hash_table (hash_table))
+    enlarge_hash_table (hash_table);
   size_t size = hash_table->size;
-  size_t count = hash_table->count;
-  if (2 * count >= size)
-    size = enlarge_hash_table (hash_table);
-  struct clause **table = hash_table->table;
   size_t start = reduce_hash (c->id, size), pos = start;
+  struct clause **table = hash_table->table;
   for (;;) {
     struct clause *res = table[pos];
-    if (res <= REMOVED)
+    if (res == REMOVED)
       break;
+    if (!res) {
+      hash_table->count++;
+      break;
+    }
     assert (res != c);
     if (++pos == size)
       pos = 0;
     assert (pos != start);
   }
-  hash_table->count = count + 1;
   table[pos] = c;
 }
 
 static void remove_clause (struct hash_table *hash_table,
                            struct clause *c) {
+  debug_clause (c, "removing from %s clause hash table",
+                hash_table_name (hash_table));
   size_t size = hash_table->size;
   struct clause **table = hash_table->table;
   size_t start = reduce_hash (c->id, size), pos = start;
@@ -1551,6 +1600,7 @@ static int simplify_clause (struct clause *c, bool *satisfied,
 
 static struct clause *add_clause (bool input) {
   struct clause *c = allocate_clause (input);
+  assert (VALID (c));
   watch_clause (c);
   bool satisfied = false, falsified = false;
   int unit = simplify_clause (c, &satisfied, &falsified);
@@ -1744,7 +1794,7 @@ static void check_unused (int type) {
     if (find_clause (&inactive, line.id))
       line_error (type, "clause identifier %" PRId64 " inactive but in use",
                   line.id);
-    debug ("clause identifier %" PRId64 " was never used", line.id);
+    debug ("clause identifier %" PRId64 " is not in use", line.id);
   }
 }
 
@@ -2563,9 +2613,11 @@ static int parse_and_check_idrup (void) {
 static void release_clauses_in_hash_table (struct hash_table *hash_table) {
   struct clause **table = hash_table->table;
   struct clause **end = table + hash_table->size;
-  for (struct clause **p = table, *c; p != end; p++)
-    if ((c = *p) > REMOVED && !c->input)
+  for (struct clause **p = table; p != end; p++) {
+    struct clause *c = *p;
+    if (VALID (c) && !c->input)
       free_clause (c);
+  }
 }
 
 static void release_active_clauses (void) {

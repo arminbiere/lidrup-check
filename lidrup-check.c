@@ -1630,14 +1630,6 @@ static void check_line_satisfies_input_clauses (int type) {
   debug ("model checked");
 }
 
-// The given core line leads to unsatisfiability through propagation.
-
-static void check_line_propagation_yields_conflict (int type) {
-  debug ("checking unsatisfiable core implied");
-  check_implied (type, "unsatisfiable core", -1);
-  debug ("unsatisfiable core implied");
-}
-
 /*------------------------------------------------------------------------*/
 
 // TODO remove or add back?
@@ -1873,7 +1865,6 @@ static void conclude_satisfiable_query_with_model (int type) {
 
 static void conclude_unsatisfiable_query_with_core (int type) {
   debug ("concluding satisfiable query");
-  check_line_propagation_yields_conflict (type);
   check_core_subset_of_query (type);
   if (num_files > 1) {
     if (saved_type == 'u')
@@ -1883,6 +1874,7 @@ static void conclude_unsatisfiable_query_with_core (int type) {
       check_saved_failed_literals_match_core (type);
     }
   }
+  check_implied (type, "unsatisfiable core", -1);
   statistics.conclusions++;
   statistics.cores++;
   debug ("unsatisfiable query concluded");
@@ -2174,7 +2166,6 @@ static int parse_and_check_icnf_and_idrup (void) {
       save_line (type);
       goto PROOF_CORE;
     } else if (type == 'u') {
-      check_line_propagation_yields_conflict (type);
       save_line (type);
       goto PROOF_CORE;
     } else {

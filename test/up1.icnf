@@ -1,0 +1,7 @@
+c user propagate example
+i 1 2 0
+i 1 -2 0
+q 2 0
+i -1 -2 0
+s UNSATISFIABLE
+u 2 0

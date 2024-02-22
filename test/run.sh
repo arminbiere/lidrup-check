@@ -73,6 +73,7 @@ run 0 weaken
 run 0 dp2
 run 0 dp3
 run 0 dp4
+run 0 up1
 
 run 0 regr1
 run 0 regr2

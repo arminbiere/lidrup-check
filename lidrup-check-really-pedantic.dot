@@ -26,10 +26,13 @@ digraph "idrup-check" {
 
   PROOF_CHECK [fontsize=20];
   PROOF_CHECK:_ -> PROOF_CHECK:nw [label=" l | d | r | w ",dir=back];
+  PROOF_CHECK -> INTERACTION_PROPAGATE [label=" i "];
   PROOF_CHECK -> INTERACTION_SATISFIABLE [label=" s SATISFIABLE "];
   PROOF_CHECK -> INTERACTION_UNSATISFIABLE [label=" s UNSATISFIABLE "];
   PROOF_CHECK -> INTERACTION_UNKNOWN [label=" s UNKNOWN "];
-  PROOF_CHECK -> INTERACTION_PROPAGATE [label=" i "];
+
+  INTERACTION_PROPAGATE [shape=box];
+  INTERACTION_PROPAGATE -> PROOF_CHECK [label=" i "];
 
   INTERACTION_UNSATISFIABLE [shape="box",label="INTERACTION_UNSATISFIABLE?"];
   INTERACTION_UNSATISFIABLE -> INTERACTION_UNSATISFIED [label=" s UNSATISFIABLE "];
@@ -45,10 +48,6 @@ digraph "idrup-check" {
 
   INTERACTION_UNKNOWN [shape=box];
   INTERACTION_UNKNOWN -> INTERACTION_INPUT [label="s UNKNOWN"];
-
-  INTERACTION_PROPAGATE [shape=box];
-  INTERACTION_PROPAGATE -> PROOF_CHECK [label=" i "];
-  INTERACTION_PROPAGATE -> INTERACTION_PROPAGATE [label=" l | d | r | w"];
 
   PROOF_MODEL -> INTERACTION_INPUT [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
   PROOF_CORE -> INTERACTION_INPUT [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];

@@ -19,6 +19,7 @@ run () {
   case $files$2 in
     1litnotincore) return;;
     2twice) return;;
+    2weaken) return;;
   esac
   expected=$1
   shift
@@ -69,6 +70,7 @@ run 0 inputlearn1
 run 0 example1
 run 0 example2
 run 0 example3
+run 0 weaken
 run 0 dp2
 run 0 dp3
 run 0 dp4

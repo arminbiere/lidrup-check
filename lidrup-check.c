@@ -1800,6 +1800,7 @@ static void check_unused (int type) {
 
 static void delete_clause (struct clause *c) {
   assert (!c->weakened);
+  remove_clause (&active, c);
   unwatch_clause (c);
   if (c->input)
     debug_clause (c, "deleting but not freeing");

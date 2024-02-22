@@ -7,7 +7,7 @@ digraph "idrup-check" {
   icnf_legend
   [shape=box,color=darkgray,fontcolor=darkgray,style=dashed,label="reading from ICNF interaction file"]
   idrup_legend
-  [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from IDRUP proof file"]
+  [style=dashed,color=darkgray,fontcolor=darkgray,label="reading from IDRUP/LIDRUP proof file"]
 
   "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
    "end-of-checking" -> INTERACTION_INPUT [label="  $    ",dir=back,fontcolor=darkgray,color=darkgray];

@@ -216,10 +216,7 @@ static const char *string;
 
 static int max_var;                // Maximum variable index imported.
 static size_t allocated;           // Allocated variables (>= 'max_var').
-static unsigned level;             // Decision level (number assumptions).
 static bool *imported;             // Variable index imported?
-static unsigned *levels;           // Decision level of assigned variables.
-static struct clauses *matrix;     // Mapping literals to watcher stacks.
 static struct hash_table active;   // Active clauses (map ID to clause).
 static struct hash_table inactive; // Inactive clauses (map ID to clause).
 static struct bit_table used;      // Used clause identifiers.
@@ -231,10 +228,7 @@ static bool *marks;                // Marks of literals.
 // without the need to check for the need for resizing when traversing
 // either, which gives an nicer code when propagating literals.
 
-static struct {
-  int *begin, *end;
-  int *units, *propagate;
-} trail;
+static struct { int *begin, *end; } trail;
 
 // Maps decision level to trail heights.
 
@@ -251,15 +245,15 @@ static struct clauses input_clauses;
 
 static struct {
   size_t added;
+  size_t checks;
   size_t conclusions;
   size_t cores;
-  size_t decisions;
   size_t deleted;
   size_t inputs;
   size_t imported;
   size_t lemmas;
   size_t models;
-  size_t propagations;
+  size_t resolutions;
   size_t queries;
   size_t restored;
   size_t weakened;
@@ -677,19 +671,6 @@ static void increase_allocated (int idx) {
   debug ("reallocating from %zu to %zu variables", allocated,
          new_allocated);
   {
-    struct clauses *new_matrix =
-        calloc (2 * new_allocated, sizeof *new_matrix);
-    if (!new_matrix)
-      out_of_memory ("reallocating matrix of size %zu", new_allocated);
-    new_matrix += new_allocated;
-    if (max_var)
-      for (int lit = -max_var; lit <= max_var; lit++)
-        new_matrix[lit] = matrix[lit];
-    matrix -= allocated;
-    free (matrix);
-    matrix = new_matrix;
-  }
-  {
     signed char *new_values =
         calloc (2 * new_allocated, sizeof *new_values);
     if (!new_values)
@@ -715,15 +696,6 @@ static void increase_allocated (int idx) {
     marks = new_marks;
   }
   {
-    unsigned *new_levels = calloc (new_allocated, sizeof *new_levels);
-    if (!new_levels)
-      out_of_memory ("reallocating levels of size %zu", new_allocated);
-    for (int idx = 1; idx <= max_var; idx++)
-      new_levels[idx] = levels[idx];
-    free (levels);
-    levels = new_levels;
-  }
-  {
     bool *new_imported = calloc (new_allocated, sizeof *new_imported);
     if (!new_imported)
       out_of_memory ("reallocating imported of size %zu", new_allocated);
@@ -733,18 +705,14 @@ static void increase_allocated (int idx) {
     imported = new_imported;
   }
   {
-    size_t size = SIZE (trail);
-    size_t units = trail.units - trail.begin;
-    size_t propagated = trail.propagate - trail.begin;
+    assert (EMPTY (trail));
     trail.begin =
         realloc (trail.begin, new_allocated * sizeof *trail.begin);
     if (!trail.begin)
       out_of_memory ("reallocating trail of size %zu", new_allocated);
-    trail.end = trail.begin + size;
-    trail.units = trail.begin + units;
-    trail.propagate = trail.begin + propagated;
-    allocated = new_allocated;
+    trail.end = trail.begin;
   }
+  allocated = new_allocated;
 }
 
 static void increase_max_var (int idx) {
@@ -1116,90 +1084,27 @@ static void unexpected_line (int type, const char *expected) {
 
 // Update trail and control stack including the decision level.
 
-static void push_trail (int lit) {
-  assert (trail.end < trail.begin + max_var);
-  *trail.end++ = lit;
-}
-
-static void pop_trail (int *new_end) {
-  assert (trail.begin <= new_end);
-  assert (new_end <= trail.end);
-  debug ("truncating trail from %zu to %zu literals",
-         trail.end - trail.begin, new_end - trail.begin);
-  trail.end = new_end;
-  assert (trail.units <= new_end);
-  if (new_end < trail.propagate) {
-    debug ("truncating propagated from %zu to %zu literals",
-           trail.propagate - trail.begin, new_end - trail.begin);
-    trail.propagate = new_end;
-  }
-}
-
-/*------------------------------------------------------------------------*/
-
-// We have four contexts in which we assign variables.
-
-static void assign_root_level_unit (int lit) {
-  assert (!level);
-  assert (trail.end == trail.units);
-  push_trail (lit);
-  trail.units++;
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = 0;
-  debug ("assign %s as root-level unit", debug_literal (lit));
-}
-
-static void assign_forced (int lit, struct clause *c) {
-  assert (level || trail.end == trail.units);
-  push_trail (lit);
-  if (!level)
-    trail.units++;
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = level;
-  debug_clause (c, "assign %s %sforced by", debug_literal (lit),
-                level ? "as root-level unit " : "");
-  (void) c;
-}
-
-static void assign_decision (int lit) {
-  push_trail (lit);
-  values[-lit] = -1;
-  values[lit] = 1;
-  int idx = abs (lit);
-  levels[idx] = level;
-  statistics.decisions++;
-  level++;
-  debug ("assign %s as decision", debug_literal (lit));
-}
-
-/*------------------------------------------------------------------------*/
-
-// Variables are only unassigned during backtracking.
-
 static void backtrack (void) {
-  debug ("backtracking to root decision level");
-  int *new_trail_end = trail.units;
-  int *p = trail.end;
-  while (p != new_trail_end) {
-    int lit = *--p;
+  for (all_elements (int, lit, trail)) {
+    debug ("unassign %s", debug_literal (lit));
     assert (values[lit] > 0);
     assert (values[-lit] < 0);
     values[lit] = values[-lit] = 0;
-#ifndef NDEBUG
-    int idx = abs (lit);
-    unsigned lit_level = levels[idx];
-    unsigned saved_level = level;
-    level = lit_level;
-    debug ("unassign %s", debug_literal (lit));
-    level = saved_level;
-#endif
   }
-  level = 0;
-  pop_trail (new_trail_end);
+  trail.end = trail.begin;
+}
+
+/*------------------------------------------------------------------------*/
+
+// Assigning a variable.
+
+static void assign (int lit) {
+  assert (!values[lit]);
+  assert (!values[-lit]);
+  *trail.end++ = lit;
+  values[-lit] = -1;
+  values[lit] = 1;
+  debug ("assign %s", debug_literal (lit));
 }
 
 /*------------------------------------------------------------------------*/
@@ -1295,9 +1200,10 @@ static struct clause *allocate_clause (bool input) {
   struct clause *c = malloc (all_bytes);
   if (!c)
     out_of_memory ("allocating clause of size %zu", size);
-  assert (file);
+  assert (VALID (c));
   c->id = line.id;
 #ifndef NDEBUG
+  assert (file);
   c->lineno = file->start_of_line;
 #endif
   c->size = size;
@@ -1520,199 +1426,13 @@ static void insert_bit (struct bit_table *bits, int64_t id) {
 
 /*------------------------------------------------------------------------*/
 
-// Watching and connecting literals is implementing here.
-
-static void watch_literal (int lit, struct clause *c) {
-  debug_clause (c, "watching %s in", debug_literal (lit));
-  PUSH (matrix[lit], c);
-}
-
-static void unwatch_literal (int lit, struct clause *c) {
-  debug_clause (c, "unwatching %s in", debug_literal (lit));
-  struct clauses *watches = matrix + lit;
-  REMOVE (struct clause *, *watches, c);
-}
-
-static void unwatch_clause (struct clause *c) {
-  if (c->size) {
-    unwatch_literal (c->lits[0], c);
-    if (c->size > 1)
-      unwatch_literal (c->lits[1], c);
-  }
-}
-
-static int move_best_watch_to_front (int *lits, const int *const end) {
-  assert (!level);
-  int watch = *lits;
-  signed char watch_value = values[watch];
-  if (watch_value < 0)
-    for (int *p = lits + 1; p != end; p++) {
-      int lit = *p;
-      signed char lit_value = values[lit];
-      if (lit_value < 0)
-        continue;
-      *lits = lit;
-      *p = watch;
-      return lit;
-    }
-  return watch;
-}
-
-static void watch_clause (struct clause *c) {
-  assert (!level);
-  if (!c->size)
-    return;
-  if (c->size == 1)
-    watch_literal (c->lits[0], c);
-  else {
-    int *lits = c->lits;
-    const int *const end = lits + c->size;
-    int lit0 = move_best_watch_to_front (lits, end);
-    int lit1 = move_best_watch_to_front (lits + 1, end);
-    debug ("first watch %s", debug_literal (lit0));
-    debug ("second watch %s", debug_literal (lit1));
-    watch_literal (lit0, c);
-    watch_literal (lit1, c);
-  }
-}
-
-static int simplify_clause (struct clause *c, bool *satisfied,
-                            bool *falsified) {
-  int unit = 0;
-  for (all_literals (lit, c)) {
-    signed char value = values[lit];
-    int idx = abs (lit);
-    if (value && levels[idx])
-      value = 0;
-    if (value > 0) {
-      *satisfied = true;
-      return 0;
-    } else if (!value) {
-      if (unit)
-        return 0;
-      unit = lit;
-    }
-  }
-  if (!unit)
-    *falsified = true;
-  return unit;
-}
-
-static struct clause *add_clause (bool input) {
-  struct clause *c = allocate_clause (input);
-  assert (VALID (c));
-  watch_clause (c);
-  bool satisfied = false, falsified = false;
-  int unit = simplify_clause (c, &satisfied, &falsified);
-  if (satisfied)
-    debug_clause (c, "added root-level satisfied");
-  else if (unit) {
-    if (level) {
-      debug_clause (c, "added root-level unit");
-      backtrack ();
-    }
-    assign_root_level_unit (unit);
-  } else if (!falsified)
-    debug_clause (c, "added");
-  else if (c->size) {
-    debug_clause (c, "all literals falsified in added");
-    if (!inconsistent) {
-      if (input)
-        message ("inconsistent input clause");
-      else
-        message ("derived inconsistent clause");
-      inconsistent = true;
-    }
-  } else {
-    debug_clause (c, "added empty");
-    if (!inconsistent) {
-      if (input)
-        message ("empty input clause");
-      else
-        message ("derived empty clause");
-      inconsistent = true;
-    }
-  }
-  return c;
-}
-
-/*------------------------------------------------------------------------*/
-
-static bool propagate (void) {
-  assert (!inconsistent);
-  assert (trail.propagate <= trail.end);
-  bool res = true;
-  while (res && trail.propagate != trail.end) {
-    int lit = *trail.propagate++;
-    debug ("propagating %s", debug_literal (lit));
-    statistics.propagations++;
-    int not_lit = -lit;
-    struct clauses *watches = matrix + not_lit;
-    struct clause **watches_end = watches->end;
-    struct clause **q = watches->begin, **p = q;
-    while (res && p != watches_end) {
-      struct clause *c = *q++ = *p++;
-      debug_clause (c, "visiting");
-      int *lits = c->lits;
-      int other_watch = lits[0] ^ lits[1] ^ not_lit;
-      signed char other_watch_value = values[other_watch];
-      if (other_watch_value > 0) {
-        debug ("satisfied by %s", debug_literal (other_watch));
-        continue;
-      }
-      int *r = lits + 2, *end_lits = lits + c->size;
-      signed char replacement_value = -1;
-      int replacement = 0;
-      while (r != end_lits) {
-        replacement = *r;
-        replacement_value = values[replacement];
-        if (replacement_value >= 0)
-          break;
-        r++;
-      }
-      if (replacement_value >= 0) {
-        debug_clause (c, "unwatching %s in", debug_literal (not_lit));
-        *r = not_lit;
-        lits[0] = other_watch;
-        lits[1] = replacement;
-        watch_literal (replacement, c);
-        q--;
-      } else if (!other_watch_value) {
-        assert (!c->weakened);
-        assign_forced (other_watch, c);
-      } else {
-        assert (other_watch_value < 0);
-        assert (!c->weakened);
-        debug_clause (c, "conflict");
-        res = false;
-      }
-    }
-    while (p != watches_end)
-      *q++ = *p++;
-    watches->end = q;
-  }
-  return res;
-}
-
-/*------------------------------------------------------------------------*/
-
-// A new query starts a new context with potentially new assumptions and
-// thus we have to backtrack to the root-level and reset the failed flag.
-
-static void reset_checker (void) {
-  if (!inconsistent && level) {
-    debug ("resetting assignment");
-    backtrack ();
-  } else
-    debug ("no need to reset assignment");
-}
+// The assumptions in the query have to be saved until the query ends.
 
 static void save_query (void) {
   debug ("saving query");
   COPY (int, query, line.lits);
   start_of_query = file->start_of_line;
   statistics.queries++;
-  reset_checker ();
 }
 
 /*------------------------------------------------------------------------*/
@@ -1735,41 +1455,29 @@ static void check_implied (int type, const char *type_str, int sign) {
     return;
   }
 
-  assert (!level);
+  statistics.checks++;
 
-  // First propagate all new units on decision level zero.
+  debug ("assigning first all line literals");
+  for (all_elements (int, lit, line.lits))
+    assign (-sign * lit);
 
-  if (trail.propagate < trail.units && !propagate ()) {
-    message ("root-level unit propagation yields conflict");
-    inconsistent = true;
-    return;
-  }
-
-  // After all root-level units have been propagated assume all literals
-  // in the line as decision if 'sign=1' or their negation if 'sign=-1'.
-
-  debug ("checking %s line is implied", type_str);
-  for (all_elements (int, lit, line.lits)) {
-    lit *= sign;
-    signed char value = values[lit];
-    if (value > 0) {
-      debug ("assumption %s already satisfied", debug_literal (lit));
-      continue;
+  for (all_elements (int64_t, id, line.ids)) {
+    if (id < 0)
+      line_error (type, "negative antecedent %" PRId64 " unsupported", id);
+    struct clause *c = find_clause (&active, id);
+    if (!c) {
+      if (find_clause (&inactive, id))
+        line_error (type, "antecedent %" PRId64 " weakened", id);
+      else
+        line_error (type, "could not find antecedent %" PRId64, id);
     }
-    if (value < 0) {
-      debug ("assumption %s already falsified", debug_literal (lit));
-      goto IMPLICATION_CHECK_SUCCEEDED;
-    }
-    assign_decision (lit);
-  }
 
-  if (propagate ())
     line_error (type, "%s implication check failed:", type_str);
+  }
 
-IMPLICATION_CHECK_SUCCEEDED:
+  // IMPLICATION_CHECK_SUCCEEDED:
 
-  if (level)
-    backtrack ();
+  backtrack ();
 
   debug ("%s implication check succeeded", type_str);
   (void) type_str;
@@ -1801,7 +1509,6 @@ static void check_unused (int type) {
 static void delete_clause (struct clause *c) {
   assert (!c->weakened);
   remove_clause (&active, c);
-  unwatch_clause (c);
   if (c->input)
     debug_clause (c, "deleting but not freeing");
   else
@@ -1812,7 +1519,6 @@ static void delete_clause (struct clause *c) {
 static void weaken_clause (struct clause *c) {
   assert (!c->weakened);
   debug_clause (c, "weakening");
-  unwatch_clause (c);
   c->weakened = true;
   remove_clause (&active, c);
   insert_clause (&inactive, c);
@@ -1825,26 +1531,6 @@ static void restore_clause (struct clause *c) {
   debug_clause (c, "restoring");
   remove_clause (&inactive, c);
   insert_clause (&active, c);
-  if (c->size) {
-    int *lits = begin_literals (c);
-    watch_clause (c);
-    int lit0 = lits[0];
-    int val0 = values[lit0];
-    if (c->size > 1) {
-      if (val0 <= 0) {
-        int lit1 = lits[1];
-        int val1 = values[lit1];
-        if (val1 < 0 || (!val1 && val0 < 0)) {
-          if (trail.begin < trail.propagate) {
-            assert (!level);
-            debug ("forcing repropagation after restoring clause");
-            trail.propagate = trail.begin;
-          }
-        }
-      }
-    } else
-      assert (val0 > 0);
-  }
   c->weakened = false;
   statistics.restored++;
 }
@@ -1976,7 +1662,7 @@ static void conclude_query (int res) {
 
 static void add_input_clause (int type) {
   check_unused (type);
-  struct clause *c = add_clause (true);
+  struct clause *c = allocate_clause (true);
   insert_clause (&active, c);
   statistics.inputs++;
   (void) type;
@@ -1984,7 +1670,7 @@ static void add_input_clause (int type) {
 
 static void check_then_add_lemma (int type) {
   check_unused (type);
-  struct clause *c = add_clause (false);
+  struct clause *c = allocate_clause (false);
   insert_clause (&active, c);
   statistics.lemmas++;
   (void) type;
@@ -2651,14 +2337,11 @@ static void release (void) {
   free (active.table);
   free (inactive.table);
   free (trail.begin);
-  matrix -= allocated;
-  free (matrix);
   values -= allocated;
   free (values);
   marks -= allocated;
   free (marks);
   free (imported);
-  free (levels);
 }
 
 /*------------------------------------------------------------------------*/
@@ -2674,9 +2357,8 @@ static void print_statistics (void) {
   printf ("c %-20s %20zu %12.2f %% conclusions\n",
           "cores:", statistics.cores,
           percent (statistics.cores, statistics.conclusions));
-  printf ("c %-20s %20zu %12.2f per lemma\n",
-          "decisions:", statistics.decisions,
-          average (statistics.decisions, statistics.lemmas));
+  printf ("c %-20s %20zu %12.2f %% lemmas\n", "checks:", statistics.checks,
+          percent (statistics.lemmas, statistics.checks));
   printf ("c %-20s %20zu %12.2f %% added\n", "deleted:", statistics.deleted,
           percent (statistics.deleted, statistics.added));
   printf ("c %-20s %20zu %12.2f %% added\n", "inputs:", statistics.inputs,
@@ -2686,9 +2368,9 @@ static void print_statistics (void) {
   printf ("c %-20s %20zu %12.2f %% conclusions\n",
           "models:", statistics.models,
           percent (statistics.models, statistics.conclusions));
-  printf ("c %-20s %20zu %12.2f per decision\n",
-          "propagations:", statistics.propagations,
-          average (statistics.propagations, statistics.decisions));
+  printf ("c %-20s %20zu %12.2f per check\n",
+          "resolutions:", statistics.resolutions,
+          average (statistics.resolutions, statistics.checks));
   printf ("c %-20s %20zu %12.2f per second\n",
           "queries:", statistics.queries, average (w, statistics.queries));
   printf ("c %-20s %20zu %12.2f %% weakened\n",

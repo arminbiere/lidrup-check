@@ -15,7 +15,7 @@ i 10 -4 5 0
 i 11 4 -5 0
 q 1 5 4 0
 s UNSATISFIABLE
-u 5 0 8 10 10 7 0
+u 5 0 11 9 7 0
 q -1 0
 s SATISFIABLE
 m -1 -2 -3 -4 -5 0

@@ -76,6 +76,7 @@ run 0 dp4
 
 run 0 regr1
 run 0 regr2
+run 0 regr3
 
 run 0 cnt2re
 

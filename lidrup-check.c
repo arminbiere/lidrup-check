@@ -1273,7 +1273,7 @@ static void enlarge_hash_table (struct hash_table *hash_table) {
     size_t new_pos = reduce_hash (c->id, new_size);
     while (new_table[new_pos])
       if (++new_pos == new_size)
-        new_pos = 1;
+        new_pos = 0;
     new_table[new_pos] = c;
   }
   size_t new_count = old_count - removed;
@@ -1320,7 +1320,7 @@ static struct clause *find_clause (struct hash_table *hash_table,
   else
     debug ("could not find clause with identifier %" PRId64
            " in %s clause hash table",
-           line.id, hash_table_name (hash_table));
+           id, hash_table_name (hash_table));
 #endif
   return res;
 }

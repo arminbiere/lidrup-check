@@ -5,14 +5,14 @@ digraph "lidrup-check" {
   "end-of-checking" [shape=diamond,color=darkgray,fontcolor=darkgray];
    "end-of-checking" -> PROOF_INPUT [label="  $    ",dir=back,fontcolor=darkgray,color=darkgray];
 
-  PROOF_INPUT -> PROOF_CHECK [label=" q "];
   PROOF_INPUT -> PROOF_INPUT [label=" i | l | d | r | w",dir=back];
+  PROOF_INPUT -> PROOF_CHECK [label=" q ",weight=2,color=orange3,fontsize=20,fontcolor=orange3];
+  PROOF_INPUT -> PROOF_CHECK [label=" s UNKNOWN ",dir=back];
 
   PROOF_CHECK [fontsize=20];
-  PROOF_CHECK -> PROOF_CHECK [label=" i | l | d | r | w ",dir=back,fontsize=20];
+  PROOF_CHECK -> PROOF_CHECK [label=" i | l | d | r | w ",dir=back];
   PROOF_CHECK -> PROOF_MODEL [label=" s SATISFIABLE "];
   PROOF_CHECK -> PROOF_CORE [label=" s UNSATISFIABLE "];
-  PROOF_CHECK -> PROOF_INPUT [label=" s UNKNOWN "];
 
   PROOF_MODEL -> PROOF_INPUT [label=" m ",color=darkgreen,fontsize=20,fontcolor=darkgreen];
   PROOF_CORE -> PROOF_INPUT [label=" u ",color=darkgreen,fontsize=20,fontcolor=darkgreen];

@@ -1573,7 +1573,7 @@ static void check_line_consistency (int type) {
   for (all_elements (int, lit, line.lits)) {
     assert (valid_literal (lit));
     if (marks[-lit])
-      check_error ("inconsistent '%c' line with both %d and %d", type, -lit,
+      check_error ("inconsistent '%c' line with literals %d and %d", type, -lit,
                    lit);
     marks[lit] = true;
   }
@@ -1590,7 +1590,7 @@ static void check_line_consistent_with_saved (int type) {
   for (all_elements (int, lit, saved)) {
     assert (valid_literal (lit));
     if (marks[-lit])
-      check_error ("inconsistent '%d' line on %d with line %zu in '%s'",
+      check_error ("inconsistent '%c' line on literal %d with line %zu in '%s'",
                    type, lit, start_of_saved, other_file->name);
   }
   unmark_line ();
